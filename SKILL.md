@@ -60,16 +60,94 @@ Treat configuration as natural-language instructions, not as a rigid schema. Do
 not place credentials in it; use existing harness profiles or environment
 variables. Do not silently combine materially conflicting external files.
 
+### Ephemeral worker storage (opencode harness only)
+
+This section applies **only when the effective worker harness is OpenCode CLI**.
+Other harnesses (Codex, claude-code, custom) have their own session/storage
+models and are unaffected by these rules. If the resolved harness is not
+opencode, skip this entire section.
+
+OpenCode has no built-in ephemeral/in-memory session mode. Every `opencode run`
+writes to a shared SQLite database at `~/.local/share/opencode/opencode.db` by
+default. Procedural DSD runs spawn many short-lived workers (implementer,
+reviewer, fixer, re-reviewer) that accumulate sessions, messages, parts, diffs,
+and snapshots — quickly reaching multi-GB database growth and making the session
+history unusable for real interactive work.
+
+To prevent this, every opencode worker spawn MUST use an isolated, disposable
+database file via the `OPENCODE_DB` environment variable. Each worker gets its
+own throwaway SQLite file; when the worker's lifecycle is complete, the file is
+deleted. This keeps the main opencode database pristine for interactive use.
+
+> **`OPENCODE_DB` must be an absolute path (or `:memory:`).** A relative value is
+> resolved by opencode against its own data directory
+> (`~/.local/share/opencode/`), **not** the current working directory, so a
+> relative path would create/look up the DB in the wrong location and resume
+> would fail to find the stored session. Always expand `<workspace>` to an
+> absolute path (e.g. via `$(pwd)`) before building `WORKER_DB`, and store the
+> absolute path verbatim in `state.json`.
+
+The pattern:
+
+1. **Before spawning a worker**, create a unique ephemeral DB path (absolute):
+   ```bash
+   # WORKSPACE must be an absolute path
+   EPHEMERAL_DB_DIR="$WORKSPACE/.plan-execution/ephemeral-db"
+   mkdir -p "$EPHEMERAL_DB_DIR"
+   WORKER_DB="$EPHEMERAL_DB_DIR/<task-id>-<role>-<round>.db"
+   # WORKER_DB is absolute and is what gets recorded in state.json
+   ```
+
+2. **Launch the worker** with `OPENCODE_DB="$WORKER_DB"` prefixed on the command.
+
+3. **Resume the same worker** with the same `OPENCODE_DB="$WORKER_DB"` value
+   (the absolute path recorded in `state.json`) so the session ID resolves in
+   the worker's own database.
+
+4. **After the worker's full lifecycle ends** (report extracted, verdict
+   recorded, no further resume needed), delete the ephemeral DB:
+   ```bash
+   rm -f "$WORKER_DB" "$WORKER_DB-wal" "$WORKER_DB-shm"
+   ```
+
+Credentials (API keys) are stored in `~/.local/share/opencode/auth.json`, a
+separate file outside the database. The worker process reads credentials from
+the default data directory regardless of `OPENCODE_DB`, so no credential
+symlinking is required.
+
+In addition, the project `opencode.json` (or the orchestrator's effective
+config) SHOULD include these settings to minimize per-worker disk growth when
+using the opencode harness:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "snapshot": false,
+  "compaction": { "auto": true, "prune": true }
+}
+```
+
+- `snapshot: false` disables the internal git snapshot system that tracks file
+  changes for undo/revert — the largest non-DB disk consumer. Workers do not
+  need undo capability.
+- `compaction.prune: true` removes old tool outputs from context to save tokens
+  and reduce the `part` table growth.
+
 ### Default worker profile
 
 - **Profile:** DeepSeek Flash Worker
 - **Harness:** OpenCode CLI
 - **Model:** `opencode-go/deepseek-v4-flash`
 - **Endpoint:** the provider already configured in OpenCode
+- **Ephemeral DB:** opencode-harness worker spawns use an isolated `OPENCODE_DB`
+  file (see "Ephemeral worker storage" above). The DB path is recorded in
+  `state.json` alongside the session ID so resume can reuse it. Non-opencode
+  harnesses skip this.
 - **Fresh launch:**
 
   ```bash
-  opencode run \
+  WORKER_DB="<ephemeral-db-path>"
+  OPENCODE_DB="$WORKER_DB" opencode run \
     --model opencode-go/deepseek-v4-flash \
     --auto \
     --title "<task-id>-<role>-<round>" \
@@ -80,12 +158,18 @@ variables. Do not silently combine materially conflicting external files.
 - **Resume:**
 
   ```bash
-  opencode run \
+  OPENCODE_DB="<worker-db-path-from-state>" opencode run \
     --model opencode-go/deepseek-v4-flash \
     --auto \
     --session "<session-id>" \
     --dir "<project-root>" \
     "<continuation-prompt>" 2>&1 | tee "<log-path>"
+  ```
+
+- **Cleanup after worker lifecycle:**
+
+  ```bash
+  rm -f "<worker-db-path>" "<worker-db-path>-wal" "<worker-db-path>-shm"
   ```
 
 - **Liveness:** within 90 seconds, require positive worker-level evidence such as
@@ -270,6 +354,7 @@ Task-id convention: `<phase-id>-<seq>` or a short stable slug.
           "rounds": 1,
           "last_verdict": "FAIL",
           "review_session_id": "svc_abc123",
+          "review_worker_db": "/abs/path/to/<workspace>/.plan-execution/ephemeral-db/phase-1-task-1-review-1.db",
           "review_independence": "independent"
         }
       },
@@ -279,12 +364,15 @@ Task-id convention: `<phase-id>-<seq>` or a short stable slug.
 }
 ```
 
+`*_worker_db` fields are present only when the harness is opencode and must
+always be absolute paths (see "Ephemeral worker storage" above).
+
 Update `state.json` before every spawn and after every meaningful transition.
 Record the effective role profile, attempt, report/log paths, verdict, session id,
-and review independence. It is the source of truth; artifacts are the evidence.
+worker ephemeral DB path (`*_worker_db`, opencode harness only), and review
+independence. It is the source of truth; artifacts are the evidence.
 
 ## The per-task loop
-
 For each task, in dependency order:
 
 1. **Prepare the task.** Compose a self-contained Implementer prompt with the
@@ -297,40 +385,55 @@ For each task, in dependency order:
    (tests, hashes, outputs, contracts, or golden artifacts) as an immutable
    preservation baseline and make preservation an explicit criterion. Updating
    expected evidence merely to hide a mismatch is forbidden.
-3. **Spawn the implementer.** Update state first, launch through the resolved
-   profile, tee output, then check startup liveness within the configured grace.
+3. **Allocate ephemeral storage (opencode harness only).** If the resolved
+   harness is opencode, create a unique worker DB path for the implementer
+   under `.plan-execution/ephemeral-db/`. Record it in `state.json` as
+   `implementer_worker_db`. This file will be deleted after the task passes or
+   is escalated-and-resolved. Non-opencode harnesses skip this step.
+4. **Spawn the implementer.** Update state first, launch through the resolved
+   profile (opencode: with `OPENCODE_DB` set to the allocated worker DB),
+   tee output, then check startup liveness within the configured grace.
    A dead launch is a transport failure: stop only the uniquely identified run,
    verify no duplicate child remains, and retry within the transport budget.
-4. **Validate the result.** Require a complete implementer report with
-   per-criterion evidence. A non-zero exit, missing/truncated report, or malformed
-   orchestration output is transport failure unless the report proves a genuine
-   substantive blocker. Compare content diff/hashes to the expected scope; mtime
-   or `find -newer` is not evidence. Unexpected necessary files require an honest
-   scope explanation; unrelated changes must be reverted or treated as findings.
-5. **Spawn a fresh reviewer** using the resolved reviewer profile. Capture its
-   session id immediately and record it in state. Give it the actual files,
-   criteria, verification, scope evidence, preservation baseline when present,
-   relevant prior reviews, and applicable entries from the defect ledger.
-6. **Interpret the report.** Find the first exact line matching
-   `^VERDICT: (PASS|FAIL)$` anywhere in `review-<n>.md`. No marker or contradictory
-   markers mean malformed transport output and are retried without consuming a
-   review round. Reject PASS without real verification or with unresolved
-   task-relevant findings.
+5. **Validate the result.** Require a complete implementer report with
+   per-criterion evidence. A non-zero exit, missing/truncated report, or
+   malformed orchestration output is transport failure unless the report proves
+   a genuine substantive blocker. Compare content diff/hashes to the expected
+   scope; mtime or `find -newer` is not evidence. Unexpected necessary files
+   require an honest scope explanation; unrelated changes must be reverted or
+   treated as findings.
+6. **Spawn a fresh reviewer** using the resolved reviewer profile. If opencode,
+   allocate a new ephemeral DB for the reviewer and record both its session id
+   and worker DB path in state immediately. Give it the actual files, criteria,
+   verification, scope evidence, preservation baseline when present, relevant
+   prior reviews, and applicable entries from the defect ledger.
+7. **Interpret the report.** Find the first exact line matching
+   `^VERDICT: (PASS|FAIL)$` anywhere in `review-<n>.md`. No marker or
+   contradictory markers mean malformed transport output and are retried
+   without consuming a review round. Reject PASS without real verification or
+   with unresolved task-relevant findings.
    - PASS with zero task-relevant findings and credible evidence → write
-     `verdict.json`, mark passed, and continue.
+     `verdict.json`, mark passed, clean up the task's ephemeral DBs (opencode
+     harness only), and continue.
    - FAIL → continue to repair.
-7. **Resume that reviewer to fix.** Use its stored session and the Fix
-   continuation prompt. It fixes every reported finding, reruns verification, and
-   writes `fix-<n>.md`. If reliable resume is unavailable, use the fallback fresh
-   Fixer with findings embedded verbatim. Record whether independence was
-   preserved, restored, degraded, or absent.
-8. **Fresh re-review.** Spawn a different fresh reviewer for round `n+1`; the
-   fixer never judges its own repair. Repeat until PASS or the substantive budget
-   is exhausted.
-9. **Escalate deliberately.** After the review budget, record the cause and let
-   the configured escalation agent or main orchestrator repair the task. Re-enter
-   fresh review when possible. If the main orchestrator must self-validate, mark
-   review independence as degraded or none rather than presenting it as peer review.
+8. **Resume that reviewer to fix.** Use its stored session and worker DB
+   (opencode: re-pass the same `OPENCODE_DB`), and the Fix continuation prompt.
+   It fixes every reported finding, reruns verification, and writes `fix-<n>.md`.
+   If reliable resume is unavailable, use the fallback fresh Fixer with findings
+   embedded verbatim. Record whether independence was preserved, restored,
+   degraded, or absent.
+9. **Fresh re-review.** Spawn a different fresh reviewer (opencode: new ephemeral
+   DB) for round `n+1`; the fixer never judges its own repair. Repeat until PASS
+   or the substantive budget is exhausted.
+10. **Escalate deliberately.** After the review budget, record the cause and
+    let the configured escalation agent or main orchestrator repair the task.
+    Re-enter fresh review when possible. If the main orchestrator must
+    self-validate, mark review independence as degraded or none rather than
+    presenting it as peer review.
+11. **Clean up ephemeral storage (opencode harness only).** When a task is
+    passed or escalated-and-resolved, delete all ephemeral DB files allocated
+    for that task (implementer, each reviewer, each fixer). Record the cleanup
+    in `state.json`.
 
 ## Resume protocol
 
@@ -342,10 +445,15 @@ new session, compaction, or crash:
 2. Find the first `in-progress` unit and inspect its artifacts.
 3. Resume from the first missing transition:
    - no complete implementer report → audit `task.md`, repair it if stale or
-     incomplete, then retry the implementer;
-   - implementation complete, no review → spawn fresh review round 1;
-   - failed review, no fix → resume its stored reviewer session or use fallback;
-   - fix complete, no next review → spawn a fresh re-reviewer;
+     incomplete, then retry the implementer (opencode: re-use its
+     `*_worker_db` from state if present, else allocate a new one);
+   - implementation complete, no review → spawn fresh review round 1 (opencode:
+     allocate a new ephemeral DB for the reviewer);
+   - failed review, no fix → resume its stored reviewer session (opencode:
+     re-pass the same `OPENCODE_DB` value from its `review_worker_db` in state),
+     or use fallback;
+   - fix complete, no next review → spawn a fresh re-reviewer (opencode: new
+     ephemeral DB);
    - complete report from an interrupted process → accept only after checking
      completeness, configuration compliance, and content evidence.
 4. Treat interrupted or dead launches as transport failures under the separate
@@ -592,8 +700,8 @@ End your reply with the verdict and review path.
 Use the active reviewer profile's configured resume method for this — do NOT
 spawn a fresh session when reliable continuation is available. Keep it short; the
 session already has the plan context, acceptance criteria, code, verification
-output, and findings. Under the built-in profile this is `opencode run --auto
---session "<reviewer-session-id>" ...`.
+output, and findings. Under the built-in opencode profile this is
+`OPENCODE_DB="<worker-db>" opencode run --auto --session "<reviewer-session-id>" ...`.
 
 ```
 You reviewed this task and reported FAIL findings in {review_path}. Now fix them.
@@ -686,6 +794,9 @@ review when possible. Never hide escalation or degraded validation.
 ## Guardrails
 
 - The main orchestrator owns the plan and final phase approval.
+- Every opencode-harness worker spawn uses an isolated ephemeral database via
+  `OPENCODE_DB`; record the path in `state.json` and delete it when the worker
+  lifecycle ends. Non-opencode harnesses are unaffected.
 - Resolve and record the effective role profile before every spawn; no silent
   fallback to another backend.
 - Fresh prompts include the full task context, Common Rules, resolved role rules,
@@ -705,19 +816,27 @@ review when possible. Never hide escalation or degraded validation.
 
 ## Worked example (single task)
 
-Given a plan whose `phase-1` has two steps:
+Given a plan whose `phase-1` has two steps, using the built-in opencode harness
+(DB paths shown abbreviated; in practice every `OPENCODE_DB` / `*_worker_db`
+value is an absolute path — see "Ephemeral worker storage"):
 
 - Task `phase-1-task-1` = "Add `POST /api/items` endpoint." Criterion: the route
   exists, validates input, stores via `ItemRepository`, returns 201. Verify:
   `pytest tests/test_items.py -q` and `node --check frontend/static/app.js`.
-- You spawn implementer (fresh) → `implementer-report.md` says all criteria met.
-- You spawn reviewer (fresh, title `phase-1-task-1-review-1`) → `review-1.md`
-  contains `VERDICT: FAIL` with finding "201 response omits the created id in the
-  body". You save its session id from `opencode session list`.
-- You RESUME that reviewer session to fix → `fix-1.md` confirms the fix + tests
-  pass (its own evidence, reused).
-- You spawn a fresh reviewer → `review-2.md` contains `VERDICT: PASS` with zero
-  findings. Task passed after 2 review rounds. Update `state.json`, next task.
+- You allocate `ephemeral-db/phase-1-task-1-impl.db` and spawn implementer
+  (fresh, `OPENCODE_DB=...impl.db`) → `implementer-report.md` says all criteria
+  met.
+- You allocate `ephemeral-db/phase-1-task-1-review-1.db` and spawn reviewer
+  (fresh, title `phase-1-task-1-review-1`, `OPENCODE_DB=...review-1.db`) →
+  `review-1.md` contains `VERDICT: FAIL` with finding "201 response omits the
+  created id in the body". You save its session id and worker DB path from
+  `opencode session list` / `state.json`.
+- You RESUME that reviewer session (re-passing the same `OPENCODE_DB`) to fix →
+  `fix-1.md` confirms the fix + tests pass (its own evidence, reused).
+- You allocate `ephemeral-db/phase-1-task-1-review-2.db` and spawn a fresh
+  reviewer → `review-2.md` contains `VERDICT: PASS` with zero findings. Task
+  passed after 2 review rounds. You delete all of this task's ephemeral DB
+  files. Update `state.json`, next task.
 - After both `phase-1` tasks pass, you review the phase yourself, run the full
   suite, and either approve (hard gate) or route your own findings through the
   same resume-to-fix loop.
