@@ -1,10 +1,10 @@
 # DeepSeek and Destroy Configuration Example
 
-This file is optional. Copy it, delete sections you do not need, and name it
-however you prefer. Any omitted setting inherits `SKILL.md` defaults.
+This file is optional. Copy it, delete sections you do not need, and change only
+the settings relevant to your project. Omitted values inherit `SKILL.md`.
 
-Do not put credentials here. Reference an existing harness profile or environment
-variable instead.
+Do not place credentials here. Reference existing harness profiles or environment
+variables.
 
 ## Agent profiles
 
@@ -14,21 +14,30 @@ variable instead.
 - Endpoint: existing OpenCode provider configuration
 - Model: `opencode-go/deepseek-v4-flash`
 - Reasoning level: default
-- Fresh launch: use `opencode run --auto --model ... --dir ...`
-- Resume: use `opencode run --auto --session ... --dir ...`
-- Positive liveness: log/report growth or harness status proving model execution
+- Fresh launch: use the OpenCode adapter in `OPENCODE.md`
+- Resume: use the OpenCode adapter with the recorded worker DB/session
+- Positive liveness: actual OpenCode process accumulated CPU time advances; do not use redirected log growth
 - Safe stop: terminate only the uniquely identified run
 - Suitable roles: implementer, reviewer, fixer, re-reviewer, phase worker
 
-### Profile: Expensive Reviewer
+### Profile: Backup Worker
+
+- Harness: <Codex, Claude Code, OpenCode, or custom>
+- Endpoint/model/profile: <existing configured profile>
+- Reasoning level: <level>
+- Fresh launch: <method>
+- Resume: <method or unsupported>
+- Positive liveness: <reliable harness-specific signal; avoid buffered-output assumptions>
+- Safe stop: <method>
+- Suitable roles: equivalent fallback when the default worker is unavailable
+
+### Profile: Expensive Specialist
 
 - Harness: Codex
 - Named agent/profile: Luna
 - Reasoning level: maximum
-- Endpoint/model: existing Codex profile
-- Fresh launch: use the environment's normal Luna launch method
-- Resume: only when reliable continuation is supported
-- Suitable roles: difficult phase review and escalation
+- Suitable roles: difficult substantive escalation or specialized phase review
+- Not suitable as: automatic fallback merely because a cheap endpoint is down
 
 ## Role routing
 
@@ -37,8 +46,11 @@ variable instead.
 - Finding fixer: resume the reviewer that produced the findings
 - Fresh re-reviewer: DeepSeek Worker in a different fresh context
 - Phase-finding worker: DeepSeek Worker
+- Substantive escalation worker: Expensive Specialist when needed
+- Equivalent worker-availability fallback: Backup Worker
 - Main phase approver: current orchestrator
-- Escalation agent: current orchestrator
+
+The main orchestrator is never an implicit worker-availability fallback.
 
 ## Role prompt additions
 
@@ -52,7 +64,7 @@ variable instead.
 
 ### Resumed fixer
 
-- Fix only the reported findings; do not silently widen scope.
+- Fix only reported findings; do not silently widen scope.
 
 ### Phase reviewer
 
@@ -60,8 +72,12 @@ variable instead.
 
 ## Planning rules
 
+- Continue automatically through tasks and phases until the plan is complete or
+  genuinely human-blocked.
 - Prefer the largest coherent task one worker can complete and verify.
-- Keep product and architectural decisions with the main orchestrator.
+- Split a task before launch when it plausibly exceeds about 30 minutes of tool-heavy work or contains natural independent units.
+- Resolve ordinary ambiguity from the plan, documentation, and existing project.
+- Keep unresolved product and architecture decisions with the main orchestrator.
 
 ## Implementation rules
 
@@ -71,11 +87,12 @@ variable instead.
 ## Review rules
 
 - Inspect actual changes and rerun real verification.
-- Fail on unresolved task-relevant findings, not merely unrelated old defects.
+- Fail on unresolved task-relevant findings, not unrelated old defects.
+- Log major findings and fixes with concise engineering rationale and evidence.
+- State the measurement predicate before asserting counts, absence, or completeness.
+- Surface and log material corrections, repair affected decisions, then continue.
 
 ## Optional domain lenses
-
-Add only what is relevant. Examples:
 
 ### Video game project
 
@@ -84,8 +101,8 @@ Add only what is relevant. Examples:
 
 ### LLM or agentic system
 
-- Review language independence, prompt/context contamination, context limits,
-  session reuse, retry behavior, model variation, and accidental deterministic assumptions.
+- Review language independence, prompt/context contamination, context pressure,
+  session reuse, retry behavior, model variance, and accidental deterministic assumptions.
 
 ### Security-sensitive system
 
@@ -95,16 +112,20 @@ Add only what is relevant. Examples:
 ## Execution overrides
 
 - Review-round budget: 5
-- Transport-attempt budget: 5
+- Immediate transport-attempt budget: 5
 - Startup-liveness grace: 90 seconds
 - Default execution: sequential
 - PASS: zero unresolved task-relevant findings
 - Live/destructive/paid tests: require explicit authorization
+- Worker availability: bounded wait/backoff, retry, then equivalent fallback
+- Persistent worker unavailability: human escalation with exact resume point
+- Orchestrator substitution for unavailable workers: prohibited
 
 ## Project rule sources
 
 - Read `AGENTS.md` when present.
 - Read `CLAUDE.md` when present.
-- Read the authoritative plan and the files it references.
+- Read the authoritative plan and every file it materially references.
+- Additional architecture sources: <optional path>
 - Additional implementation rules: <optional path>
 - Additional review rules: <optional path>

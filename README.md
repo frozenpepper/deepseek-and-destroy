@@ -1,205 +1,304 @@
 # DeepSeek and Destroy
 
-> **Feed it a plan. Let the workers implement, review, fix, and repeat until the code survives.**
+> **Feed it a plan. It keeps spawning, reviewing, fixing, and moving forward until the plan is actually done.**
 
 DeepSeek and Destroy is a portable coding-agent skill for executing large,
-multi-phase implementation plans without making the main orchestrator personally
-do every file edit, test run, review pass, and repair.
+multi-phase implementation plans without turning the main orchestrator into an
+overworked implementation mule.
 
-The basic idea is simple:
+The main orchestrator keeps the complete project picture:
 
-- the **main orchestrator** reads the whole plan, makes the important decisions,
-  decomposes the work, handles escalation, and approves complete phases;
-- capable, inexpensive **worker agents** perform most of the implementation,
-  verification, review, and repair work;
-- every repair is checked by fresh eyes before the task is accepted;
-- progress is written to disk so a crashed or compacted session can resume instead
-  of reenacting the first half of *Memento*.
+- what the plan is trying to achieve;
+- how the phases depend on each other;
+- what the project’s architecture and ethos require;
+- when a decision is genuinely high level;
+- whether a phase is really ready to pass.
 
-Despite the name, DeepSeek is the default worker—not a requirement. The worker
-harness, endpoint, model, role routing, and project-specific rules can all be
-overridden with an optional Markdown configuration file.
+Worker agents do most of the expensive-volume work:
+
+- implementation;
+- verification;
+- independent review;
+- repair;
+- fresh re-review.
+
+The default workers use DeepSeek V4 Flash through OpenCode because it is capable,
+fast, and cheap enough to throw at repeated implementation/review loops without
+hearing your wallet scream. DeepSeek is the default, not a requirement.
 
 ---
 
-## What actually happens
+## The rule that matters most
 
-For every bounded task, the skill runs this loop:
+Once you give DeepSeek and Destroy an authoritative plan, it is expected to
+**execute the plan**, not explain what it might do and wait for you to keep saying
+“continue.”
+
+It should keep moving through:
 
 ```text
-                         ┌──────────────────────────┐
-                         │   Main orchestrator      │
-                         │ reads + decomposes plan  │
-                         └────────────┬─────────────┘
-                                      │
-                                      ▼
-                         ┌──────────────────────────┐
-                         │ Fresh IMPLEMENTER        │
-                         │ changes code + verifies  │
-                         └────────────┬─────────────┘
-                                      │
-                                      ▼
-                         ┌──────────────────────────┐
-                         │ Fresh REVIEWER           │
-                         │ inspects actual work     │
-                         └───────┬──────────┬───────┘
-                                 │ PASS     │ FAIL
-                                 │          ▼
-                                 │   Resume that reviewer
-                                 │   to fix its own findings
-                                 │          │
-                                 │          ▼
-                                 │   Fresh REVIEWER checks
-                                 │   the repaired result
-                                 │          │
-                                 └──────────┴───────────────┐
-                                                            ▼
-                                               Task accepted only when
-                                               no relevant findings remain
+task → review → fix → fresh review → next task → phase gate → next phase
 ```
 
-When every task in a phase passes, the main orchestrator performs a broader
-**phase-level hard gate**. This is where cross-task integration, architecture,
-plan fidelity, and the full phase verification are judged.
+until one of four things happens:
 
-In other words: cheap workers turn the wrenches; the expensive model remains the
-architect, foreman, and final inspector.
+1. the entire plan and its delivery artifacts are complete;
+2. a genuinely human-level blocker is reached;
+3. you explicitly pause it;
+4. you abandon the run.
 
----
+A task finishing is not a reason to stop.  
+A phase finishing is not a reason to stop.  
+A test failing is not a reason to stop.  
+A reviewer finding problems is definitely not a reason to stop—that is literally
+why the reviewer is there.
 
-## Why use it?
-
-Large plans are awkward for a single coding-agent context. The model that
-understands the whole project gradually fills its context with terminal output,
-file contents, test logs, repair attempts, and seventeen slightly different
-versions of the same stack trace.
-
-DeepSeek and Destroy keeps that main context focused on high-value reasoning by
-pushing bounded work into disposable or resumable worker sessions.
-
-It is useful when:
-
-- a plan contains several ordered phases or many implementation steps;
-- each step needs real verification rather than a confident “looks good”;
-- independent review matters;
-- the work may outlive one context window or one uninterrupted session;
-- you want strict phase gates without paying premium-model prices for every
-  mechanical implementation pass;
-- you are tired of asking, “Did the agent actually run the tests, or did it just
-  develop a strong emotional belief that they would pass?”
-
-It is probably unnecessary for a two-line typo fix, a tiny isolated script, or a
-task whose entire plan is “rename this button.”
+A context window ending is also not plan completion. The skill stores an exact
+`next_action` so the next orchestrator session continues the run rather than
+performing a dramatic reading of the previous session’s accomplishments.
 
 ---
 
-## Default setup: zero configuration required
+## What the loop does
 
-Out of the box, the skill uses:
+For each bounded task:
+
+```text
+Fresh IMPLEMENTER
+        │
+        ▼
+Fresh REVIEWER
+   │         │
+ PASS      FAIL
+   │         │
+   │         ▼
+   │   Resume that reviewer
+   │   to fix its own findings
+   │         │
+   │         ▼
+   │   Fresh REVIEWER checks
+   │   the repaired result
+   │         │
+   └─────────┴──────► task accepted
+```
+
+The useful twist is the repair step:
+
+- the reviewer that investigated the problem keeps its evidence and context;
+- that reviewer is resumed to repair the exact findings;
+- a different fresh reviewer validates the result.
+
+After all tasks in a phase pass, the main orchestrator performs the hard gate:
+integration, architecture, cross-task effects, domain impact, plan fidelity, and
+the complete phase verification.
+
+Cheap workers turn the wrenches. The orchestrator remains the architect,
+foreman, and final inspector.
+
+---
+
+## It does not ask humans to do the orchestrator’s homework
+
+The orchestrator is expected to read:
+
+- the authoritative plan;
+- `AGENTS.md` and `CLAUDE.md` when present;
+- architecture documents;
+- handovers;
+- schemas and contracts;
+- project guides referenced by the plan;
+- previous accepted evidence and major engineering decisions.
+
+It should resolve ordinary ambiguity from those sources and make decisions that
+fit the project’s scope, architecture, ethos, and the spirit of the plan.
+
+It should not interrupt you for routine implementation choices, failing tests,
+task re-scoping, or the obvious next phase.
+
+Human escalation is reserved for things such as:
+
+- contradictory requirements with materially different outcomes;
+- a real missing product or architecture decision;
+- required credentials, access, devices, files, or external environments;
+- destructive/live/paid actions needing authorization;
+- worker quota or credits being exhausted;
+- a persistent provider outage;
+- unsafe concurrent work that cannot be isolated;
+- a plan that is genuinely impossible or materially incomplete.
+
+---
+
+## Broken workers do not turn the orchestrator into a worker
+
+This is explicit because several orchestrators apparently needed the emotional
+support.
+
+When a worker endpoint has connection problems, rate limits, an outage,
+authentication failure, or no remaining credit, the main orchestrator must not
+say:
+
+> “Fine, I’ll just implement and review everything myself.”
+
+Instead it must:
+
+1. preserve the exact run state;
+2. decide whether the failure is plausibly temporary;
+3. wait/back off and retry when reasonable;
+4. use an equivalent configured fallback worker when available;
+5. escalate to the human when external action is required.
+
+Worker availability problems are plumbing problems, not permission to destroy the
+cost model and independent-review model.
+
+The orchestrator may intervene directly only for a substantive last-resort
+engineering problem while the worker system itself is functioning.
+
+---
+
+## Multiple orchestrators are supported
+
+Every execution owns a separate run:
+
+```text
+DeepSeekAndDestroy/
+└── plans/
+    └── <plan-id>/
+        └── runs/
+            └── <run-id>/
+```
+
+Each run keeps its own:
+
+- manifest and owner;
+- plan reference and immutable plan snapshots;
+- state and exact next action;
+- configuration;
+- worker logs and reports;
+- major findings/fixes log;
+- defect ledger;
+- phase and task artifacts.
+
+Separate run folders protect orchestration history. They do **not** magically
+protect source files. Two orchestrators that may edit the same files need
+separate Git worktrees/branches or explicitly non-overlapping scopes.
+
+See `WORKSPACE.md` for the complete contract.
+
+---
+
+## Major engineering findings are not allowed to evaporate
+
+Every run contains:
+
+```text
+major-findings-and-fixes.md
+```
+
+It records the important stuff future agents should not have to rediscover:
+
+- serious defects and regressions;
+- non-obvious root causes;
+- consequential architecture or contract decisions;
+- major fixes and why they were chosen;
+- rejected alternatives when they matter;
+- verification and remaining risks;
+- worker availability incidents;
+- orchestrator interventions and human escalations.
+
+It is not a transcript and not hidden chain-of-thought. It is a concise,
+evidence-linked engineering record.
+
+---
+
+## Default setup: no configuration required
+
+Out of the box:
 
 - **Worker harness:** OpenCode CLI
 - **Worker model:** `opencode-go/deepseek-v4-flash`
-- **Endpoint:** whatever provider is already configured in OpenCode
-- **Worker roles:** implementation, review, repair, fresh re-review, and
-  phase-finding repair
+- **Endpoint:** your existing OpenCode provider configuration
+- **Execution:** sequential
+- **Review rounds:** 5 before orchestrator reassessment
+- **Immediate transport attempts:** 5 per invocation
+- **Startup liveness grace:** 90 seconds
 - **Main phase approver:** the orchestrator that loaded the skill
-- **Execution:** sequential by default
-- **Review budget:** 5 substantive rounds
-- **Transport retry budget:** 5 attempts per invocation
 
-You do **not** need to provide a configuration file when this setup matches your
-environment.
+The default OpenCode adapter uses isolated disposable databases for workers so
+hundreds of short-lived sessions do not inflate the normal OpenCode history
+database into a small moon.
 
-You only need:
-
-1. OpenCode installed and available to the orchestrator;
-2. access to `opencode-go/deepseek-v4-flash` through your OpenCode provider
-   configuration; and
-3. a real implementation plan with enough detail to decompose and verify.
-
-The skill can itself be loaded by Codex, Claude Code, OpenCode, or another capable
-coding harness. Without an override, those orchestrators still launch the workers
-through OpenCode—that is intentional.
+See `OPENCODE.md`.
 
 ---
 
 ## Install
 
-Copy the whole folder into the skills directory used by your harness:
+Copy the complete folder into the skills directory used by your harness:
 
 ```text
 deepseek-and-destroy/
 ├── SKILL.md
 ├── README.md
-└── CONFIG.example.md
+├── WORKSPACE.md
+├── PROMPTS.md
+├── OPENCODE.md
+├── CONFIG.example.md
+└── CHANGELOG.md
 ```
 
-Exact skill-directory locations differ between harnesses and user setups. Use the
-same location where your other working skills live.
+`SKILL.md` is the core mission and orchestration policy.
 
-`SKILL.md` is the actual skill. `README.md` is this guide.
-`CONFIG.example.md` is optional and exists to be copied and edited—not worshipped
-as sacred YAML.
+The companion files keep the core readable:
+
+- `WORKSPACE.md` — state, plans, concurrency, logging;
+- `PROMPTS.md` — exact implementer/reviewer/fixer prompts;
+- `OPENCODE.md` — OpenCode-specific worker adapter;
+- `CONFIG.example.md` — optional model, routing, and project rules.
 
 ---
 
 ## Quick start
 
-Give the orchestrator the skill, the authoritative plan path, and any delivery or
-live-testing constraints that matter:
-
 ```text
 Use DeepSeek and Destroy to execute the authoritative plan at
 DOCS/Plans/implementation-plan.md.
 
-Complete all work that does not require live testing first. Preserve the plan's
-phase gates and produce the requested package and handover artifacts.
+Continue autonomously until the complete plan is finished or a genuine
+human-level blocker is reached. Complete all work that does not require an
+authorized live test before preparing the final live-test gate.
 ```
 
 That is enough when the defaults fit.
 
-A good plan should make clear:
+A useful activation prompt may also specify delivery requirements:
 
-- what each phase is supposed to achieve;
-- important contracts and behavior that must remain compatible;
-- acceptance criteria;
-- verification commands or observable evidence;
-- which tests require live services, payment, destructive actions, or your local
-  environment.
+```text
+Use DeepSeek and Destroy to execute PLAN.md.
 
-The skill can resolve ordinary implementation details from the repository. It
-should not invent missing product decisions or silently rewrite the plan's intent.
+Keep the project package, plan-progress record, and standalone handover updated.
+Do not stop after individual tasks or phases. Escalate only for major human
+decisions, unavailable access/authorization, or unresolved worker availability.
+```
 
 ---
 
 ## Optional configuration
 
-Configuration is deliberately external so the core skill stays readable and the
-same installed copy can serve different projects and harnesses.
+Use `CONFIG.example.md` to change only what you need:
 
-Start from `CONFIG.example.md`, delete everything you do not need, and change only
-the parts you care about.
+- harnesses, endpoints, models, named agents, and reasoning levels;
+- role routing;
+- fresh-launch and resume methods;
+- equivalent fallback workers;
+- project-specific implementation/review rules;
+- game, narrative, LLM, security, UX, or other domain review lenses;
+- budgets, liveness, and live-test policy;
+- additional rule and guide paths.
 
-You can override things such as:
+Configuration is a partial Markdown override, not a brittle schema. Missing
+settings keep the defaults.
 
-- worker harnesses, endpoints, models, named agents, and reasoning levels;
-- which profile performs each role;
-- how fresh and resumed sessions are launched;
-- role-specific prompt additions;
-- planning, implementation, and review rules;
-- domain review lenses for games, narrative systems, LLM pipelines, security,
-  UX, accessibility, or other specialized projects;
-- liveness grace periods, retry budgets, and live-test policy;
-- project-local rule and guide files that workers must read.
-
-Example first prompt:
-
-```text
-Use DeepSeek and Destroy to execute PLAN.md.
-Use the attached DSD_CONFIG.md as the external configuration.
-```
-
-A project can also keep one unambiguous configuration file named:
+You may attach it, name it explicitly, or keep one project-local file named:
 
 ```text
 .deepseek-and-destroy.md
@@ -207,142 +306,87 @@ deepseek-and-destroy.config.md
 DSD_CONFIG.md
 ```
 
-Configuration is a **partial override**. Missing values continue using the built-in
-defaults. You do not need to reproduce the entire example just to change one
-reviewer model.
-
-Do not place API keys or tokens in the file. Reference an existing harness
-profile, provider configuration, or environment variable instead.
-
-### Configuration priority
-
-When several instruction sources exist, the skill resolves them in this order:
-
-1. explicit instructions in the current user prompt;
-2. a configuration file explicitly attached or named by the user;
-3. one unambiguous project-local configuration file;
-4. a sibling `CONFIG.md`, when the harness exposes it;
-5. the defaults in `SKILL.md`.
-
-Before launching any worker, the orchestrator must resolve the profile and rules
-for that exact role and place the relevant instructions directly into its prompt.
-Workers do not inherit configuration telepathically.
-
-The effective, secret-free result is recorded under:
-
-```text
-.plan-execution/effective-configuration.md
-```
-
-If a worker launches with the wrong model, endpoint, profile, session mode, or
-required rule set, that run is rejected rather than quietly treated as valid.
+Do not put credentials in it.
 
 ---
 
-## The `.plan-execution/` workspace
+## Configuration priority
 
-The skill maintains a durable workspace inside the project:
+1. explicit current user instructions;
+2. explicitly attached or named configuration;
+3. one unambiguous project-local configuration;
+4. sibling `CONFIG.md` when available;
+5. built-in defaults.
 
-```text
-.plan-execution/
-├── state.json
-├── effective-configuration.md
-├── out-of-scope-defects.md
-└── <phase-id>/
-    └── <task-id>/
-        ├── task.md
-        ├── implementer-report.md
-        ├── review-1.md
-        ├── fix-1.md
-        ├── review-2.md
-        ├── run logs...
-        └── verdict.json
-```
+Before every spawn, the orchestrator resolves the exact worker profile and rules
+for that role and places them directly in the prompt. Workers do not inherit
+configuration through spiritual osmosis.
 
-This is not decorative paperwork. It allows a new or compacted orchestrator
-session to determine whether it should:
-
-- launch an implementer;
-- review completed work;
-- resume a reviewer to repair its findings;
-- run a fresh re-review;
-- complete a phase gate; or
-- recognize that the plan is already finished.
-
-The result is resumable execution without depending on one chat session remembering
-every detail forever.
+The main orchestrator is **not** an implicit fallback worker.
 
 ---
 
 ## Reliability lessons already paid for in blood
 
-The workflow includes several protections learned from long real-world runs:
+### A PID is not proof of intelligent life
 
-### A process existing does not mean a worker started
+The liveness check is harness-specific. For OpenCode, redirected stdout may be
+block-buffered, so an empty log proves nothing. The built-in adapter captures the
+actual OpenCode PID and confirms that its accumulated CPU time advances across
+sampling windows before allowing a long wait.
 
-After launch, the orchestrator looks for positive worker-level liveness—such as
-log growth, report growth, or reliable harness status—before waiting through a
-long timeout. A silent wrapper process is not proof of life.
+### Transport failure is not a review finding
 
-### Broken transport is not broken code
+Dead launches, flaky connections, malformed reports, and provider problems use a
+separate availability path and do not burn substantive review rounds.
 
-Dead launches, flaky connections, hung wrappers, and malformed reports use a
-separate retry budget. They do not consume substantive review rounds and do not
-force the expensive orchestrator to take over merely because the plumbing had a
-bad afternoon.
+### Refactors preserve accepted behavior
 
-### Refactors must preserve accepted behavior
-
-When a task refactors previously accepted work, the orchestrator captures relevant
-pre-change evidence and gives it to the implementer as a preservation gate. The
-agent may not “fix” a mismatch by updating the expected evidence.
+Previously accepted outputs/contracts can be captured as immutable preservation
+evidence. Agents may not “fix” a mismatch by updating the expected evidence.
 
 ### Timestamps are liars
 
-Scope verification uses version-control diffs or content hashes. A regenerated but
-identical file is not treated as changed merely because its modification time had
-an exciting day.
+Scope and preservation use content diffs or hashes, never modification time alone.
 
-### Unrelated defects get recorded, not smuggled into scope
+### Old defects stay in their own lane
 
-A real pre-existing bug discovered during a bounded task is written to the defect
-ledger. Reviewers are told about it, fixers may not silently widen the task to
-repair it, and the main orchestrator decides what to do with it at the phase gate.
+A pre-existing unrelated bug goes into the defect ledger. It is not silently
+smuggled into the current task or repeatedly used to fail it.
+
+### Intended work is not a running worker
+
+State distinguishes `prepared`, `launching`, and `in-progress`. A task cannot be
+called in progress unless a real attempt exists and either its worker is live or
+a complete report proves it ran. This catches the classic “updated state, forgot
+to launch” failure immediately.
+
+### Big tasks get cut before they explode
+
+If a unit plausibly needs more than roughly 30 minutes of tool-heavy work or
+contains several naturally verifiable pieces, the orchestrator splits it before
+the first worker launch.
+
+### Old prompts can point at dead places
+
+Retries audit rules, criteria, commands, **and every path**. A prompt that still
+writes to yesterday's run folder is not a valid prompt.
+
+### Counts need a predicate
+
+Before claiming “there are 17,” “none exist,” or “all callers are covered,” the
+agent states what it searched and what counted. Contradictory worker evidence
+triggers a fresh, wider derivation—not a defence of the old number.
+
+### Being autonomous does not mean pretending you were right
+
+A material correction is surfaced, logged, and used to repair affected decisions.
+Then execution continues; the correction is not an excuse to stop the run.
 
 ### Fresh review means fresh review
 
-If escalation forces the main orchestrator to validate its own repair, the loss of
-independence is recorded. Self-validation is never dressed up later as peer review
-wearing a fake moustache.
-
----
-
-## Project-specific rules
-
-DeepSeek and Destroy does not replace repository instructions. It must still read
-and respect applicable files such as:
-
-- `AGENTS.md`;
-- `CLAUDE.md`;
-- the authoritative plan;
-- architecture documents and handovers referenced by the plan;
-- project-specific implementation, review, or domain guides.
-
-The optional configuration can point to additional rule sources or add concise
-role-specific instructions.
-
-This is particularly useful when a reviewer needs more than generic code quality.
-For example:
-
-- a game reviewer may need to examine gameplay, progression, balance, narrative
-  continuity, save compatibility, and player experience;
-- an LLM-system reviewer may need to examine prompt contamination, language
-  independence, context pressure, retry behavior, and model variance;
-- a security reviewer may need to examine trust boundaries, authorization,
-  destructive operations, and recovery behavior.
-
-Those details belong in the project or external configuration, not permanently in
-every installation of the core skill.
+When independence is lost, the skill records it honestly instead of putting a
+fake moustache on self-review and calling it peer validation.
 
 ---
 
@@ -350,76 +394,50 @@ every installation of the core skill.
 
 ### Do I have to use DeepSeek?
 
-No. It is the cheap and capable default that inspired the name. Configure another
-model or harness for any role—or all of them.
+No. It inspired the name and is the default worker. Every role can be routed to
+another harness or model.
 
-### Do I need a configuration file?
+### Does it work without a configuration file?
 
-No. The built-in OpenCode + DeepSeek Flash profile is complete.
+Yes. The built-in OpenCode + DeepSeek profile is complete.
 
-### Does the main orchestrator still review the work?
+### Does it stop after every phase?
 
-Yes. Workers handle task-level implementation and review loops. The main
-orchestrator retains decomposition, architectural judgment, escalation, and every
-major phase approval.
+It should not. Phase completion causes the next phase to start immediately.
 
-### Why does the reviewer fix its own findings?
+### When should it ask me something?
 
-Because that reviewer has already gathered the relevant evidence and code context.
-It is resumed for efficient repair, but a different fresh reviewer must validate
-the result so the fixer never grades its own homework.
+Only when the human escalation gate is met: a major unresolved decision,
+authorization/access requirement, persistent worker availability problem, or
+another blocker that project authority cannot solve.
 
-### Why not let one agent do everything?
+### What if DeepSeek runs out of credit?
 
-You can. Eventually its context may resemble an attic after a tornado. This skill
-keeps the broad plan in one place while sending bounded work to focused contexts.
+The orchestrator preserves state and either retries later, uses a configured
+equivalent fallback, or asks you to restore worker capacity. It does not suddenly
+become the implementation workforce.
 
-### Is it fully autonomous?
+### Can multiple orchestrators run it?
 
-It can execute substantial plans without constant supervision, but it deliberately
-stops for unresolved product decisions, unsafe or destructive actions, paid/live
-tests requiring authorization, and failures that exhaust the configured budgets.
-
-### Does it cheat tests to get a green checkmark?
-
-It is explicitly instructed not to weaken, skip, delete, rewrite, or special-case
-tests to manufacture a pass. Verification is evidence, not an obstacle course to
-be quietly demolished.
+Yes, using unique run folders and source-code isolation where scopes overlap.
 
 ### Can it survive a crashed session?
 
-That is one of its main purposes. `state.json` and the task artifacts define the
-resume point.
+That is one of the main points. The run stores its plan snapshot, state, evidence,
+and exact next action.
 
----
+### Is it fully autonomous?
 
-## Files in this folder
-
-### `SKILL.md`
-
-The complete orchestration contract, workflow, worker prompts, recovery protocol,
-quality gates, and built-in defaults.
-
-### `CONFIG.example.md`
-
-An optional, human-editable example for changing agents, role routing, prompts,
-rules, domain lenses, and execution policy.
-
-### `README.md`
-
-The friendly tour. You are currently inside it. Please keep your hands and feet
-within the Markdown until the ride has stopped.
+Within the authority granted by the plan and project documentation, yes. It will
+not invent missing product decisions, supply credentials, authorize destructive
+operations, or pretend an unavailable external service works.
 
 ---
 
 ## The philosophy in one paragraph
 
-Use powerful orchestration where broad context and judgment matter. Use cheap,
-capable workers for bounded implementation and verification. Preserve independent
-review. Resume contexts when retained evidence is valuable. Write progress to
-disk. Treat real tests and artifacts as evidence. Escalate honestly when the loop
-cannot converge.
-
-Or, less formally:
-
-> **Make the cheap model do the work. Wake the expensive model for the important decisions. Destroy the plan—constructively.**
+Use the strongest expensive model for the decisions that require a complete view
+of the project. Use capable inexpensive workers for implementation and repeated
+quality loops. Preserve evidence, decisions, and recovery state. Keep moving
+without demanding ceremonial “continue” prompts. Stop only when the plan is
+actually complete or the remaining problem genuinely belongs to a human.
