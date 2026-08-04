@@ -23,18 +23,30 @@ DeepSeekAndDestroy/
               0001-intake-<original-name> # immutable copy at intake
               0002-<timestamp>-<name>      # later plan revision, never overwrite
           state.json                       # durable execution state for this run only
+          authority-index.json              # governing paths, hashes, compact summaries
+          HANDOVER.md                        # compact resume packet and exact next action
           effective-configuration.md       # resolved configuration; no secrets
           major-findings-and-fixes.md      # append-only engineering rationale log
           out-of-scope-defects.md          # unrelated defects discovered during work
           ephemeral-db/                    # opencode only; delete DBs after lifecycle
           phases/
             <phase-id>/
+              current-state-audit.md       # Phase Surveyor output
+              phase-audit.md               # latest Phase Auditor synthesis for hard gate
+              phase-audits/                # preserved prior phase-audit rounds
+              phase-remediation-1.md       # immutable orchestrator remediation plan
+              phase-remediation-2.md       # additional gate cycles when needed
+              verification/                # phase-level Verification Worker reports
               <task-id>/
                 task.md
+                discovery-spec.md           # discovery tasks only
                 scope-baseline.json
+                scope-diff.json
                 preservation-baseline.md
+                recovery-audit.md            # reportless-worker audit when needed
                 implementer.log
                 implementer-report.md
+                verification-report.md      # verification-only tasks when used
                 review-1.md   fix-1.md
                 review-2.md   fix-2.md
                 ... review-5.md
@@ -109,7 +121,10 @@ trimmed or excluded according to project policy. Do not blanket-ignore the whole
 `DeepSeekAndDestroy/` tree when its durable history is intended to be tracked;
 ignore ephemeral DBs and oversized transient logs selectively.
 
-Task-id convention: `<phase-id>-<seq>` or a short stable slug.
+Task directories use a stable, collision-resistant task uid recorded in state,
+for example `<phase-id>-<seq>-<short-slug>-<4hex>`. Never derive a sibling task
+path by appending one character to another task id. All prompts use the exact
+stored path rather than reconstructing it from memory.
 
 ### state.json
 
@@ -126,19 +141,24 @@ Task-id convention: `<phase-id>-<seq>` or a short stable slug.
   "plan_source_sha256": "<sha256>",
   "orchestrator_id": "claude-opus-main",
   "project_worktree": "/abs/path/to/project-worktree",
+  "authority_index": "<run-root>/authority-index.json",
+  "handover": "<run-root>/HANDOVER.md",
   "effective_config": "<run-root>/effective-configuration.md",
   "major_log": "<run-root>/major-findings-and-fixes.md",
   "execution_status": "active",
   "terminal_condition": null,
   "next_action": "resume phase-1-task-1 reviewer round 1 as fixer",
   "decision_sources": ["DOCS/Plans/example.md", "AGENTS.md", "DOCS/Architecture.md"],
-  "worker_availability": { "status": "available", "last_incident": null },
+  "worker_availability": { "status": "available", "last_incident": null, "next_probe_at": null },
   "phases": {
     "phase-1": {
       "status": "in-progress",
       "tasks": {
         "phase-1-task-1": {
           "status": "in-progress",
+          "task_type": "implementation",
+          "prompt_path": "<run-root>/phases/phase-1/phase-1-task-1/task.md",
+          "report_path": "<run-root>/phases/phase-1/phase-1-task-1/review-1.md",
           "role_profile": "DeepSeek Flash Worker",
           "transport_attempts": 1,
           "current_attempt": {
@@ -153,10 +173,22 @@ Task-id convention: `<phase-id>-<seq>` or a short stable slug.
           "last_verdict": "FAIL",
           "review_session_id": "svc_abc123",
           "review_worker_db": "/abs/path/to/<run-root>/ephemeral-db/phase-1-task-1-review-1.db",
-          "review_independence": "independent"
+          "review_independence": "independent",
+          "fast_path_eligible": true,
+          "evidence_resolution": {
+            "status": "clear",
+            "pending_question": null,
+            "assigned_worker_report": null
+          }
         }
       },
-      "phase_review": { "status": "pending", "findings": [] }
+      "phase_review": {
+        "status": "pending",
+        "cycle": 0,
+        "latest_audit": null,
+        "latest_remediation": null,
+        "findings": []
+      }
     }
   }
 }
@@ -173,8 +205,12 @@ State transitions must describe reality, not intention. Use these minimum states
   equivalent harness identity, launch time, profile, and log/report paths are
   recorded;
 - **`in-progress`** — positive liveness was confirmed for that launched attempt;
-- a later evidence state — a complete report/verdict exists even if the process
-  already exited.
+- **`waiting-for-worker`** — a transient provider incident is being re-probed;
+  `next_probe_at`, profile, attempt history, and relaunch `next_action` exist;
+- **`process-exited`** — the worker has actually exited or the harness emitted a
+  reliable completion signal; report files may still need validation;
+- a later evidence state — a complete report/verdict exists and final hashes/diffs
+  were captured after process exit.
 
 Never mark a task or role `in-progress` merely because a spawn was intended. The
 following consistency invariant is mandatory:
@@ -195,6 +231,172 @@ report/log paths, verdict, session id, worker ephemeral DB path when applicable,
 review independence, current plan hash, major-log path, execution status, and one
 exact `next_action`. `state.json` is the source of truth **inside that run**;
 artifacts are the evidence.
+
+
+### Authority cache and resume fast path
+
+`authority-index.json` records every governing plan/document/config/prompt-library
+path with its content hash and a concise authority summary. `HANDOVER.md` records
+the active phase/task, latest accepted Decision Packets, open major findings,
+worker availability, exact `next_action`, and the paths needed to continue.
+
+On resume, read `HANDOVER.md`, `state.json`, `plan-reference.md`, and the relevant
+Decision Packets first. Compare hashes mechanically. Re-read only files that
+changed, lack a trustworthy summary, or are required verbatim for the next
+plan-wide decision. Do not reload the unchanged plan, all architecture documents,
+all task reports, the full major log, or all of `PROMPTS.md` merely because a new
+orchestrator session began.
+
+When a companion template file is unchanged, read only the required role section
+or use its recorded template hash/version. This resume fast path is the default;
+full-context reconstruction is reserved for missing, stale, or contradictory
+state.
+
+### Decision Packets and evidence loading
+
+Every worker artifact begins with `## Decision Packet`. The orchestrator reads
+that section first, preferably through `scripts/decision_packet.py`. Full reports,
+raw logs, code, and large artifacts remain cold evidence and are opened only when:
+
+- the packet is missing, malformed, or internally inconsistent;
+- two independent packets conflict;
+- scope/preservation evidence moved unexpectedly;
+- review independence was lost;
+- a material correction invalidates prior acceptance;
+- a plan-wide decision genuinely requires detailed inspection.
+
+For a fresh independent PASS with clean mechanical evidence and
+`FAST-PATH ELIGIBLE: YES`, the packet is sufficient for task acceptance. Routine
+importance is not a reason to duplicate the review.
+
+### Turn-exit and next-action invariant
+
+An active run may yield an orchestrator turn only when at least one is true:
+
+- a recorded worker identity is live;
+- the run is `waiting-for-worker` with a concrete persisted `next_probe_at` and
+  relaunch action;
+- a legitimate terminal state is recorded.
+
+A future-tense note such as "launch task X next" is not enough. The process or
+probe must already have started. A harness Stop hook may enforce this invariant. The included
+`scripts/check_state.py` can support such a hook, but the invariant—not the
+script—is authoritative.
+
+### Phase current-state audit
+
+Before first decomposition of a phase—or after material plan/tree drift—the
+orchestrator commissions a fresh **Phase Surveyor** to create or update
+`phases/<phase-id>/current-state-audit.md`. Reuse the existing audit after routine
+accepted tasks; do not resurvey the phase merely because execution resumed. It is
+a read-only measured inventory:
+
+- required capabilities that already exist;
+- which are actually wired/reachable versus merely present;
+- unreviewed or partially written code/artifacts;
+- unexpected changes and likely provenance when evidence supports it;
+- missing or stale paths assumed by the plan;
+- verification already available and verification still required;
+- recommended independently reviewable task units.
+
+The surveyor performs the repository-scale measurement and cites its predicates,
+commands, files, and symbols. The orchestrator reads only the Decision Packet by
+default, resolves conflicts against plan authority, and decides decomposition. It
+must not personally reproduce the survey absent a recorded conflict trigger.
+
+This audit prevents duplicate tasks and makes partial output from dead workers
+visible before new work is scheduled.
+
+### Scope baseline and crash-damage protocol
+
+Before every mutating worker spawn, use `scripts/scope_snapshot.py`, equivalent
+VCS/hash tooling, or a cheap bounded baseline worker to record:
+
+- cryptographic hashes for every existing declared in-scope file;
+- the expected path set, including expected new paths;
+- hashes for relevant untracked files;
+- a broader changed-path/diff inventory sufficient to detect unexpected edits
+  outside the declared scope.
+
+This is mechanical evidence collection. The orchestrator verifies the declared
+scope and that a baseline artifact exists; it should not manually hash and inspect
+every file.
+
+`git status --porcelain` is useful only for discovering path names. Its status
+letters do not prove content stability: an already-modified file remains `M`, and
+an untracked file remains `??` after a full rewrite. Never use status letters as
+the scope predicate.
+
+If a worker exits without a complete report, is killed, times out, or loses
+transport after beginning work:
+
+1. mark the task `suspect-changes`;
+2. wait until the process is confirmed exited;
+3. mechanically capture the before/after hash and content-diff evidence;
+4. when any non-obvious change exists, spawn a fresh **Recovery Auditor** to
+   classify complete, partial, undeclared, baseline-moving, and unsafe changes;
+5. have the Recovery Auditor recommend adopt-for-review, quarantine, revert, or
+   additional evidence without modifying the tree;
+6. let the orchestrator choose the disposition from the compact audit and project
+   authority;
+7. update the phase current-state audit;
+8. only then retry, split, or schedule another task.
+
+Never infer "no report" as "no code changes". The orchestrator owns the recovery
+decision, not the volume forensic inspection.
+
+### Phase audit evidence
+
+Before the main-orchestrator hard gate, keep substantial verification reports
+under `phases/<phase-id>/verification/` and have a fresh **Phase Auditor** write
+`phases/<phase-id>/phase-audit.md`. The phase audit synthesizes task verdicts,
+verification evidence, scope/preservation results, integration risks, relevant
+defects, and plan fidelity. It does not approve the phase.
+
+The orchestrator reads the Phase Auditor Decision Packet first and makes the final
+approval decision from compact evidence. It does not inspect project code, rerun
+phase verification, repeat reviewer measurements, or resolve factual uncertainty
+itself. A conflict or missing fact becomes a fresh targeted worker assignment.
+Raw multi-megabyte artifacts and long suite output remain in worker reports.
+
+### Phase remediation cycles
+
+When the orchestrator's phase gate finds a gap, it writes an immutable
+`phase-remediation-<n>.md` rather than changing project files. The remediation plan
+contains:
+
+- the source phase-audit/finding ids and concise rationale;
+- the governing plan or architecture decision;
+- bounded independently reviewable worker tasks and dependencies;
+- acceptance criteria, required verification, preservation tripwires, and
+  explicit exclusions;
+- the evidence required before the phase gate may be retried.
+
+Every remediation task uses the normal worker implementation/review/repair loop.
+After all remediation tasks pass, fresh Verification Workers rerun affected gates
+and a new fresh Phase Auditor writes the next audit. Preserve previous audits and
+remediation plans; never overwrite the evidence chain. The orchestrator then
+repeats the plan-wide approval decision. It never implements or self-verifies a
+phase remediation.
+
+### Completion evidence
+
+A report file appearing is a checkpoint, not a completion signal. Workers may
+still be writing code, logs, major-log entries, or other artifacts. Capture final
+hashes/diffs and assert missing artifacts only after process exit or a reliable
+harness completion event.
+
+### User-facing progress record
+
+The run files are the detailed progress record. User-facing chat is not a mirror of
+those files. For routine transitions, the orchestrator may provide one concise
+status sentence containing task id, active role, and state. Long explanations of
+worker findings, test counts, file paths, or engineering rationale stay in the
+Decision Packet and major log.
+
+A fuller user message is reserved for a material correction, human blocker, major
+plan-level decision, phase completion, or final completion. Even then, summarize
+and link the durable artifact instead of reproducing it.
 
 ### Major findings and fixes log
 
@@ -222,8 +424,10 @@ Do not clutter it with routine edits, formatting, ordinary test output, or every
 minor review note. Record concise engineering rationale and evidence, **not hidden
 chain-of-thought, private scratchpad, or raw internal deliberation**.
 
-Use a stable heading/id and append finding and fix entries rather than rewriting
-history. Each entry should contain, as applicable:
+Use a stable heading/id and update one root-cause thread with linked finding,
+decision, fix, and verification status rather than creating a new entry for every
+routine follow-up. Consolidate closely related corrections/incidents when they
+share the same root cause. Each entry should contain, as applicable:
 
 ```markdown
 ## <entry-id> — <short title>

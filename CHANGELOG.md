@@ -1,5 +1,83 @@
 # Changelog
 
+## v8 — Worker authority and phase-remediation gates
+
+- Made the worker/orchestrator boundary absolute: workers establish technical
+  facts and modify project files; the orchestrator routes, decides, and approves.
+- Removed direct orchestrator spot checks, code intervention, test execution, and
+  self-verification paths.
+- Added the doubt-to-worker rule: conflicting or suspicious evidence launches a
+  fresh clean-context Review, Verification, Discovery, Recovery, or Phase Audit
+  worker; findings re-enter repair plus fresh re-review.
+- Changed non-converging task handling to re-scope, commission discovery, improve
+  prompts, or route stronger workers rather than orchestrator takeover.
+- Added immutable `phase-remediation-<n>.md` plans. Every phase-gate finding is
+  converted into bounded worker tasks, followed by fresh verification and a new
+  Phase Auditor before the gate repeats.
+- Clarified that the hard gate is a plan-wide judgment, not a task-level code
+  review or implementation pass.
+
+## v7 — Orchestrator quota economy
+
+- Added an explicit task-acceptance fast path after credible independent PASS.
+- Prohibited routine orchestrator code rereads, test reruns, artifact reparsing, and count re-derivation.
+- Added recorded triggers and a two-check limit for direct orchestrator spot checks.
+- Added compact Decision Packets to every worker report and a helper to extract them.
+- Added hash-based authority caching and a resume fast path that avoids rereading unchanged plans/docs/run history.
+- Added minimum-sufficient prompt envelopes and a three-item cap on bespoke reviewer risk hypotheses.
+- Added sparse user-facing communication defaults; detailed evidence remains in run artifacts.
+- Clarified that Phase Surveyor audits are reused until material drift.
+- Consolidated related major-log entries by root cause.
+- Added collision-resistant task directory guidance.
+
+## Delegation-boundary revision
+
+Corrects an overreach introduced by the context-load revision: the reliability
+requirements remain, but their tool-heavy execution returns to cheap workers and
+mechanical helpers.
+
+- establish the primary rule: the orchestrator owns decisions, routing, conflict
+  resolution, and approval—not repository-scale investigation volume;
+- add Phase Surveyor, Recovery Auditor, and Phase Auditor worker roles;
+- make current-state audits worker-produced inputs to decomposition;
+- build rich prompts from authoritative documentation and durable worker briefs
+  rather than orchestrator rediscovery;
+- capture scope baselines through a helper, equivalent tooling, or a bounded cheap
+  worker;
+- route reportless-worker forensics to a fresh Recovery Auditor while the
+  orchestrator chooses the final disposition;
+- route large verification classes to Verification Workers and phase evidence
+  synthesis to a Phase Auditor;
+- retain the main orchestrator as the only phase approver, with targeted spot
+  checks rather than mandatory bulk command execution;
+- add `scripts/scope_snapshot.py` for mechanical content-hash capture and compare.
+
+## Context-load and crash-recovery revision
+
+Based on 42 worker launches and field reports from long plan executions:
+
+- count independently reviewable units before each spawn and split when there is
+  more than one primary unit;
+- treat discovery cost, artifact size, and verification classes as task size;
+- add discovery workers that emit cited durable specs before construction;
+- choose fresh implementer versus resumed explorer based on whether findings
+  compress without losing important context;
+- add explicit exclusions and verification-only worker prompts;
+- require workers to create reports early and append during execution;
+- wait for process exit before final artifact/scope judgments;
+- treat reportless worker exits as suspect-tree events requiring hash/diff
+  reconciliation;
+- forbid VCS status letters as content-preservation evidence;
+- use fresh fixers after heavy review contexts instead of blindly resuming them;
+- replace single-signal OpenCode liveness with process + elapsed + CPU + output
+  classification and warn against `pgrep -f` self-matches;
+- add minimal health probes, exact model-id discovery, active
+  `WAITING-FOR-WORKER` re-probing, and automatic fallback/relaunch;
+- require phase current-state audits before decomposition;
+- strengthen reviewer independence, bidirectional gate checks, authority/path
+  validation, and verification-coverage checks;
+- forbid ending an active turn on a future-tense intention.
+
 ## Runtime reliability and claim-discipline revision
 
 Based on extended orchestrator use:

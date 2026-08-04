@@ -16,11 +16,14 @@ The main orchestrator keeps the complete project picture:
 
 Worker agents do most of the expensive-volume work:
 
+- current-state surveys;
+- subsystem discovery and call-path tracing;
 - implementation;
-- verification;
+- verification and large-artifact analysis;
 - independent review;
-- repair;
-- fresh re-review.
+- repair and fresh re-review;
+- reportless-worker recovery audits;
+- phase evidence synthesis.
 
 The default workers use DeepSeek V4 Flash through OpenCode because it is capable,
 fast, and cheap enough to throw at repeated implementation/review loops without
@@ -88,26 +91,63 @@ The useful twist is the repair step:
 - that reviewer is resumed to repair the exact findings;
 - a different fresh reviewer validates the result.
 
-After all tasks in a phase pass, the main orchestrator performs the hard gate:
-integration, architecture, cross-task effects, domain impact, plan fidelity, and
-the complete phase verification.
+After all tasks in a phase pass, verification workers run the substantial phase
+checks and a fresh phase auditor synthesizes the evidence. The main orchestrator
+performs the hard gate: integration, architecture, cross-task effects, domain
+impact, plan fidelity, and final approval.
 
-Cheap workers turn the wrenches. The orchestrator remains the architect,
+Cheap workers survey the site, turn the wrenches, run the machinery, inspect the
+wreckage, and prepare the evidence. The orchestrator remains the architect,
 foreman, and final inspector.
+
+
+If the final inspector finds a problem, it does not grab a wrench. It writes a
+small phase-remediation plan, sends the investigation and fixes back through the
+worker loops, commissions fresh verification and a fresh phase audit, then repeats
+the gate. Doubt always creates another worker assignment; it never creates a
+second implementation job for the orchestrator.
+
+---
+
+## Decisions stay expensive; investigation stays cheap
+
+The orchestrator owns the whole-plan decisions. It does **not** need to personally
+perform every repository scan, call-graph trace, hash comparison, five-megabyte
+artifact audit, browser battery, or full test suite.
+
+The default division is:
+
+```text
+Main orchestrator:
+understand → decide → route → judge → approve
+
+Cheap workers:
+survey → discover → implement → verify → review → fix → recover → audit
+
+Helpers:
+hash → compare → monitor → validate state → health probe
+```
+
+That means a richer implementation prompt should normally come from a durable
+worker-produced survey or discovery brief—not from Opus spending half its context
+rediscovering the repository before DeepSeek even starts.
+
+The main orchestrator still understands the governing plan and project authority,
+resolves plan-wide contradictions, chooses task boundaries, decides whether
+findings are material, and owns every phase gate. On resume it uses hashes, the
+handover, and Decision Packets rather than rereading an unchanged documentation
+corpus. When technical evidence conflicts, it sends the exact question to a fresh
+worker in a clean context; it does not inspect or verify the implementation itself.
 
 ---
 
 ## It does not ask humans to do the orchestrator’s homework
 
-The orchestrator is expected to read:
-
-- the authoritative plan;
-- `AGENTS.md` and `CLAUDE.md` when present;
-- architecture documents;
-- handovers;
-- schemas and contracts;
-- project guides referenced by the plan;
-- previous accepted evidence and major engineering decisions.
+On a new run, the orchestrator reads the authoritative plan and governing project
+instructions. It records hashes and compact summaries. On resume, it starts from
+the handover, state, plan reference, and Decision Packets, then rereads only
+changed or decision-critical sources instead of paying again for the entire
+history.
 
 It should resolve ordinary ambiguity from those sources and make decisions that
 fit the project’s scope, architecture, ethos, and the spirit of the plan.
@@ -125,6 +165,51 @@ Human escalation is reserved for things such as:
 - a persistent provider outage;
 - unsafe concurrent work that cannot be isolated;
 - a plan that is genuinely impossible or materially incomplete.
+
+---
+
+## The orchestrator is not paid twice for the same review
+
+A fresh reviewer PASS is supposed to save premium-model work, not trigger another
+full review by the orchestrator.
+
+The default fast path is:
+
+```text
+independent reviewer PASS
++ verification reports PASS
++ scope/preservation clean
++ no conflicting evidence
+= accept task and continue
+```
+
+The orchestrator does not reread the code, rerun the suite, reparse the artifact,
+or rederive counts. When evidence conflicts, it records the exact disputed
+predicate and sends a fresh cheap worker to review, verify, discover, or adjudicate
+it. If that worker finds a defect, the normal repair and fresh re-review loop runs
+again until the evidence is clear.
+
+Worker reports begin with a compact **Decision Packet**, so the orchestrator can
+make normal routing and acceptance decisions without loading the full forensic
+record. The helper `scripts/decision_packet.py` extracts that section.
+
+The same economy applies to chat. Routine worker transitions get a short status,
+not several paragraphs repeating the report. Detailed reasoning lives in the run
+folder; humans hear about material corrections, blockers, major plan decisions,
+phase completion, and final completion.
+
+
+### Doubt means “spawn,” not “inspect”
+
+The orchestrator is expected to rely on the workers. When a result feels doubtful,
+it does not open the code and start a second review. It launches a fresh worker
+with a clean context and one exact question. Missing test evidence goes to a
+Verification Worker. A questionable implementation goes to a fresh Reviewer.
+Architecture uncertainty goes to Discovery. Conflicting reports get a targeted
+independent adjudication.
+
+If the new worker finds a problem, that problem enters the same repair → fresh
+review loop. The orchestrator keeps routing until the evidence is clear.
 
 ---
 
@@ -150,8 +235,9 @@ Instead it must:
 Worker availability problems are plumbing problems, not permission to destroy the
 cost model and independent-review model.
 
-The orchestrator may intervene directly only for a substantive last-resort
-engineering problem while the worker system itself is functioning.
+The orchestrator does not intervene directly in implementation or review. Repeated
+worker difficulty triggers re-scoping, discovery, a cleaner prompt, a stronger
+configured worker, or a precise human escalation—not an expensive-model takeover.
 
 ---
 
@@ -243,7 +329,12 @@ deepseek-and-destroy/
 ├── PROMPTS.md
 ├── OPENCODE.md
 ├── CONFIG.example.md
-└── CHANGELOG.md
+├── CHANGELOG.md
+└── scripts/
+    ├── check_state.py
+    ├── decision_packet.py
+    ├── opencode_probe.py
+    └── scope_snapshot.py
 ```
 
 `SKILL.md` is the core mission and orchestration policy.
@@ -253,7 +344,10 @@ The companion files keep the core readable:
 - `WORKSPACE.md` — state, plans, concurrency, logging;
 - `PROMPTS.md` — exact implementer/reviewer/fixer prompts;
 - `OPENCODE.md` — OpenCode-specific worker adapter;
-- `CONFIG.example.md` — optional model, routing, and project rules.
+- `CONFIG.example.md` — optional model, routing, and project rules;
+- `scripts/check_state.py` — optional Stop-hook/state invariant checker;
+- `scripts/opencode_probe.py` — isolated exact-model health probe;
+- `scripts/scope_snapshot.py` — mechanical content-hash baseline and comparison.
 
 ---
 
@@ -287,7 +381,8 @@ decisions, unavailable access/authorization, or unresolved worker availability.
 Use `CONFIG.example.md` to change only what you need:
 
 - harnesses, endpoints, models, named agents, and reasoning levels;
-- role routing;
+- role routing, including phase surveyors, discovery workers, verification-only
+  workers, recovery auditors, and phase auditors;
 - fresh-launch and resume methods;
 - equivalent fallback workers;
 - project-specific implementation/review rules;
@@ -331,9 +426,9 @@ The main orchestrator is **not** an implicit fallback worker.
 ### A PID is not proof of intelligent life
 
 The liveness check is harness-specific. For OpenCode, redirected stdout may be
-block-buffered, so an empty log proves nothing. The built-in adapter captures the
-actual OpenCode PID and confirms that its accumulated CPU time advances across
-sampling windows before allowing a long wait.
+block-buffered, so bytes alone prove nothing. The adapter combines the exact
+process identity, elapsed time, accumulated CPU, and output growth: dead, slow,
+and wedged workers are different states. It also avoids `pgrep -f` self-matches.
 
 ### Transport failure is not a review finding
 
@@ -361,11 +456,44 @@ called in progress unless a real attempt exists and either its worker is live or
 a complete report proves it ran. This catches the classic “updated state, forgot
 to launch” failure immediately.
 
-### Big tasks get cut before they explode
+### One independently reviewable unit per worker
 
-If a unit plausibly needs more than roughly 30 minutes of tool-heavy work or
-contains several naturally verifiable pieces, the orchestrator splits it before
-the first worker launch.
+Before spawning, the orchestrator lists the units. One behavioral change plus its
+direct tests can be one unit. A validator, wiring, fixture migration, generated
+client, artifact audit, browser battery, and full-suite run are separate when each
+can be reviewed alone. More than one unit means split.
+
+### Discovery writes a spec before construction
+
+Unfamiliar subsystem? First send an explorer to produce a cited, durable spec and
+stop. If the result compresses cleanly, a fresh implementer gets the brief. If it
+does not, resume the explorer for a narrowly bounded build turn. Either way, the
+reviewer is fresh. Session memory is useful; a file is durable.
+
+### The orchestrator does not become the explorer
+
+Before phase decomposition, a cheap Phase Surveyor measures what exists, what is
+wired, what is merely present, and what partial work already exists. Reportless
+worker damage goes to a Recovery Auditor. Large phase evidence goes to a Phase
+Auditor. The orchestrator decides from those artifacts instead of personally
+absorbing their repository-scale workload.
+
+### Reports are written while the worker is still alive
+
+Workers create reports/specs early and append. A dying session can still leave
+usable findings. The watchdog waits for process exit before judging final artifacts;
+a report file appearing is only a checkpoint.
+
+### Dead workers may leave live damage
+
+A reportless worker exit makes the tree suspect. Hashes and content diffs are
+reconciled before any retry or next task. “No report” never means “no edits.”
+
+### Verification can be its own worker
+
+Large artifact analysis, browser runs, mutation testing, and long full suites are
+first-class verification-only units. They do not need to consume the same context
+as code review.
 
 ### Old prompts can point at dead places
 
@@ -387,6 +515,20 @@ Then execution continues; the correction is not an excuse to stop the run.
 
 When independence is lost, the skill records it honestly instead of putting a
 fake moustache on self-review and calling it peer validation.
+
+---
+
+### Provider trouble gets a health probe, not five giant retries
+
+A minimal `HEALTHCHECK OK` probe separates a broken task from a broken endpoint.
+The exact model id comes from the harness's model listing, not memory. Transient
+outages enter `WAITING-FOR-WORKER`, re-probe on backoff, and relaunch automatically
+or use a configured healthy fallback.
+
+### “Launching next” is not launching next
+
+An active orchestrator turn may end only with a live worker, an active persisted
+wait/probe, or a legitimate terminal state. Future tense is not a process.
 
 ---
 
@@ -436,8 +578,10 @@ operations, or pretend an unavailable external service works.
 
 ## The philosophy in one paragraph
 
-Use the strongest expensive model for the decisions that require a complete view
-of the project. Use capable inexpensive workers for implementation and repeated
-quality loops. Preserve evidence, decisions, and recovery state. Keep moving
+Use the strongest expensive model for whole-plan decisions, routing, conflict
+resolution, and phase approval. Use capable inexpensive workers for surveys,
+discovery, implementation, verification, review, repair, recovery forensics, and
+evidence synthesis. Use small helpers for mechanical state, hashing, liveness, and
+health checks. Preserve evidence, decisions, and recovery state. Keep moving
 without demanding ceremonial “continue” prompts. Stop only when the plan is
 actually complete or the remaining problem genuinely belongs to a human.

@@ -122,39 +122,71 @@ using the opencode harness:
   rm -f "<worker-db-path>" "<worker-db-path>-wal" "<worker-db-path>-shm"
   ```
 
-- **Liveness:** redirected OpenCode stdout may be block-buffered, so a healthy
-  worker can leave its log at zero bytes for minutes. **Do not use log growth or
-  report growth as the built-in OpenCode startup-liveness test.** Use accumulated
-  CPU time of the actual OpenCode process as the default positive signal:
+- **Liveness and completion:** redirected OpenCode stdout may be block-buffered,
+  so output bytes alone are unreliable. Classify the worker using three signals:
+  process existence, accumulated CPU time, and output/report growth, together with
+  elapsed time.
+
+  Always prefer the exact PID captured at launch. Do not use
+  `pgrep -f "<task-title>"`: a watcher whose own command line contains the title can
+  match itself and report a dead worker as alive. When recovering without a saved
+  PID, match the actual command conservatively, for example
+  `ps -ax -o pid=,command= | grep "[o]pencode run" | grep -- "<exact-title>"` and
+  reject ambiguous matches.
 
   ```bash
-  # WORKER_PID must be the actual opencode process, not tee or a wrapper shell.
-  kill -0 "$WORKER_PID" 2>/dev/null || exit 1
-  C1=$(ps -o time= -p "$WORKER_PID" | tr -d ' ')
-  sleep 35
-  kill -0 "$WORKER_PID" 2>/dev/null || exit 1
-  C2=$(ps -o time= -p "$WORKER_PID" | tr -d ' ')
+  # WORKER_PID is the actual opencode process captured at launch.
+  sample_worker() {
+    kill -0 "$WORKER_PID" 2>/dev/null || return 3
+    CPU=$(ps -o time= -p "$WORKER_PID" | tr -d ' ')
+    OUT=$(wc -c < "$LOG_PATH" 2>/dev/null || printf 0)
+    NOW=$(date +%s)
+    printf '%s %s %s\n' "$NOW" "$CPU" "$OUT"
+  }
 
-  if [ "$C1" != "$C2" ]; then
-    echo "OpenCode worker liveness confirmed"
-  else
-    # One additional interval avoids declaring a slow startup/network pause dead.
-    sleep 35
-    kill -0 "$WORKER_PID" 2>/dev/null || exit 1
-    C3=$(ps -o time= -p "$WORKER_PID" | tr -d ' ')
-    [ "$C2" != "$C3" ] || exit 2
-  fi
+  read -r T1 C1 O1 < <(sample_worker)
+  sleep 35
+  read -r T2 C2 O2 < <(sample_worker)
+
+  # Process absent => dead. CPU or output advancing => alive/slow; continue.
+  # Process present with negligible CPU and no output over repeated windows after
+  # the grace period => probable wedge; use the safe-stop/retry policy.
   ```
 
-  Advancing accumulated CPU time confirms that the worker is doing work even when
-  redirected output is buffered. Two consecutive unchanged samples within the
-  configured grace mean liveness was not established: safely stop only that
-  uniquely identified process and retry under the transport policy. A future
-  OpenCode version may provide a stronger explicit worker-status API; use it only
-  when verified reliable and configured as an override. A PID or session record
-  alone remains insufficient.
-- **Roles:** implementer, reviewer, resumed fixer, fresh re-reviewer, and
-  phase-finding worker.
+  Interpret the signals:
+
+  - **dead:** process absent;
+  - **alive/slow:** CPU accumulates or output/report grows; keep waiting even if the
+    other signal is quiet;
+  - **probable wedge:** substantial elapsed time, process still present, and both
+    CPU and output remain effectively unchanged across repeated windows;
+  - **unknown:** collect another window rather than guessing.
+
+  A report file appearing is not completion. Wait for process exit or a reliable
+  harness completion event before declaring logs/major entries absent or capturing
+  final scope hashes.
+
+- **Graceful cap behavior:** workers are prompted to draft reports early. A time or
+  context cap is a degradation point, not permission to `kill -KILL` and discard
+  evidence. Near the configured soft cap, use the harness's graceful completion
+  method when available. For the built-in CLI, prefer `SIGINT`, wait for exit, then
+  `SIGTERM` only if necessary; reserve `SIGKILL` for a runaway process that cannot
+  be stopped safely. After any forced or reportless exit, apply the suspect-tree
+  protocol in `WORKSPACE.md`.
+
+- **Provider health probe and recovery:** before spending repeated task attempts on
+  similar banner-only, empty, or provider errors, verify the exact model identifier
+  from `opencode models` and run a trivial isolated probe asking for exactly
+  `HEALTHCHECK OK`. Use a fresh ephemeral DB. Do not infer billing or exhausted
+  credit solely from an error string. Probe the configured fallback profile too;
+  reroute automatically when it is equivalent and healthy. For a transient outage,
+  persist `waiting-for-worker`, `next_probe_at`, and the relaunch action, then
+  re-probe on schedule instead of waiting for a human continuation message. The
+  included `scripts/opencode_probe.py` implements the isolated exact-model probe;
+  orchestration policy still decides backoff, fallback, and relaunch.
+
+- **Roles:** discovery worker, implementer, verification-only worker, reviewer,
+  resumed fixer, fresh re-reviewer, and phase-finding worker.
 
 Default routing uses this profile for every worker role. The current main
 orchestrator performs decomposition, plan-wide decisions, substantive escalation
