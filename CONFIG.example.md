@@ -173,3 +173,28 @@ The main orchestrator is never an implicit worker-availability fallback.
 - Task-specific reviewer risks: maximum 3 concise hypotheses beyond the standard reviewer contract.
 - Resume behavior: use HANDOVER/state/Decision Packets and authority hashes; reread only changed or decision-critical sources.
 - User-facing updates: sparse; one-line routine status, fuller messages only for material correction, blocker, phase completion, or final completion.
+
+## Orchestrator context checkpoints
+
+These settings govern the **main orchestrator**, independently from worker
+profiles.
+
+- Enabled: yes
+- Orchestrator harness: auto-detect; explicit value wins
+- Checkpoint due percent: 65
+- Compact before percent: 75
+- Hard context ceiling percent: 80
+- Accepted-task fallback interval when percentage is unavailable: 4
+- Checkpoint before long phase gate: yes
+- Checkpoint after plan revision or major remediation cycle: yes
+- Maintain HANDOVER incrementally: yes
+- Maximum HANDOVER narrative target: 1500 words
+- Install project-local harness hooks/plugins when supported: yes
+- Modify user-global harness configuration: no
+- Block native compaction when checkpoint preparation fails: yes
+- Multiple active runs: require exact `DSD_RUN_ROOT` or matching orchestrator session id
+
+The percentage settings are used only when the harness exposes a trustworthy
+context measurement or an exact token threshold can be configured without
+inventing the model context window. Otherwise native hooks and safe-boundary
+fallback checkpoints provide durability.

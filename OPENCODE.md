@@ -1,8 +1,9 @@
 # DeepSeek and Destroy — OpenCode Adapter
 
-Read this file only when the effective worker profile uses OpenCode CLI. It
-defines the built-in DeepSeek Flash worker profile and the required isolated
-ephemeral database behavior.
+Read this file when either the main orchestrator or an effective worker profile
+uses OpenCode. It defines the built-in DeepSeek Flash worker profile, isolated
+ephemeral worker databases, liveness/provider handling, and the OpenCode V2
+orchestrator compaction adapter.
 
 ### Ephemeral worker storage (opencode harness only)
 
@@ -60,22 +61,27 @@ the default data directory regardless of `OPENCODE_DB`, so no credential
 symlinking is required.
 
 In addition, the project `opencode.json` (or the orchestrator's effective
-config) SHOULD include these settings to minimize per-worker disk growth when
-using the opencode harness:
+config) SHOULD disable snapshots for disposable workers:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "snapshot": false,
-  "compaction": { "auto": true, "prune": true }
+  "compaction": {
+    "auto": true,
+    "keep": { "tokens": 8000 },
+    "buffer": 20000
+  }
 }
 ```
 
-- `snapshot: false` disables the internal git snapshot system that tracks file
-  changes for undo/revert — the largest non-DB disk consumer. Workers do not
-  need undo capability.
-- `compaction.prune: true` removes old tool outputs from context to save tokens
-  and reduce the `part` table growth.
+- `snapshot: false` disables the internal git snapshot system used for undo and
+  revert. Disposable workers do not need it.
+- In OpenCode V2, `compaction.keep.tokens` controls the retained recent tail and
+  `compaction.buffer` controls how early automatic compaction is considered.
+- Do not rely on `compaction.prune` for V2 disk or context reduction: the current
+  V2 documentation states that it is accepted by the schema but has no runtime
+  pruning effect.
 
 ### Default worker profile
 
@@ -210,3 +216,53 @@ decisions, and final phase approval. It is not a fallback worker when OpenCode i
 unavailable. Default review budget is 5 substantive rounds; default immediate
 transport budget is 5 launch attempts per role invocation. Execution is
 sequential.
+
+
+## Main-orchestrator context checkpoints in OpenCode V2
+
+This section applies when the **main orchestrator** itself runs in OpenCode. It is
+separate from the ephemeral worker-database rules above.
+
+OpenCode V2 provides automatic/manual compaction and an
+`experimental.session.compacting` plugin hook. It does not currently document a
+post-compaction hook equivalent to Codex or Claude Code `SessionStart compact`.
+Therefore the best protocol is:
+
+1. keep `HANDOVER.md` incrementally current;
+2. install the project-local pre-compaction plugin;
+3. create the external checkpoint before OpenCode generates its summary;
+4. inject exact checkpoint/run paths into the compaction prompt;
+5. rely on the live skill plus `state.json.context_checkpoint` to force
+   rehydration before further project work.
+
+Install the adapter:
+
+```bash
+python3 <skill-root>/scripts/install_compaction_adapter.py \
+  --harness opencode \
+  --project-root <project-root>
+```
+
+This copies:
+
+- `.opencode/plugins/dsd-compaction.ts`;
+- `DeepSeekAndDestroy/tools/context_checkpoint.py`.
+
+Restart or reload OpenCode so the project-local plugin is active.
+
+When exact context usage is visible, prepare at the configured threshold
+(default 65%) and request `/compact` at the next safe boundary. OpenCode also
+supports a session-compaction API. When exact usage is unavailable, rely on the
+plugin plus the periodic safe-boundary checkpoints in `COMPACTION.md`.
+
+OpenCode's generated checkpoint is lossy and is presented as historical context,
+not as fresh instructions. The external DSD checkpoint remains authoritative.
+After compaction, if `state.json.context_checkpoint.status` is `prepared`,
+`compacting`, or `rehydration-required`, the orchestrator's first action is to
+reload the skill/run files and execute `verify-resume`. It must not continue
+project work from the native summary alone.
+
+Official references:
+
+- https://opencode.ai/v2/docs/compaction
+- https://opencode.ai/docs/plugins/

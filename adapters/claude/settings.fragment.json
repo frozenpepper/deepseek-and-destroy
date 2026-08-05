@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "^(manual|auto)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/DeepSeekAndDestroy/tools/context_checkpoint.py\" hook --harness claude-code --event precompact",
+            "statusMessage": "Preparing DSD context checkpoint",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "^(manual|auto)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/DeepSeekAndDestroy/tools/context_checkpoint.py\" hook --harness claude-code --event postcompact",
+            "statusMessage": "Recording DSD compaction",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^(compact|resume)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/DeepSeekAndDestroy/tools/context_checkpoint.py\" hook --harness claude-code --event sessionstart",
+            "statusMessage": "Reloading DSD run state",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

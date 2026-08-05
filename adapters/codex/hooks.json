@@ -1,0 +1,45 @@
+{
+  "description": "DeepSeek and Destroy durable context checkpoint hooks",
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "^(manual|auto)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/DeepSeekAndDestroy/tools/context_checkpoint.py\" hook --harness codex --event precompact",
+            "statusMessage": "Preparing DSD context checkpoint",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "^(manual|auto)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/DeepSeekAndDestroy/tools/context_checkpoint.py\" hook --harness codex --event postcompact",
+            "statusMessage": "Recording DSD compaction",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^(compact|resume)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/DeepSeekAndDestroy/tools/context_checkpoint.py\" hook --harness codex --event sessionstart",
+            "statusMessage": "Reloading DSD run state",
+            "additionalContextLimit": 2200,
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

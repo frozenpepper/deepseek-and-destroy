@@ -24,7 +24,17 @@ DeepSeekAndDestroy/
               0002-<timestamp>-<name>      # later plan revision, never overwrite
           state.json                       # durable execution state for this run only
           authority-index.json              # governing paths, hashes, compact summaries
-          HANDOVER.md                        # compact resume packet and exact next action
+          HANDOVER.md                        # incrementally maintained compact continuity packet
+          compactions/
+            LATEST                           # latest immutable checkpoint sequence
+            0001/
+              CHECKPOINT.md
+              resume-manifest.json
+              state.snapshot.json
+              HANDOVER.snapshot.md
+              plan-reference.snapshot.md
+              authority-index.snapshot.json
+              native-compact-summary.md      # when exposed by the harness
           effective-configuration.md       # resolved configuration; no secrets
           major-findings-and-fixes.md      # append-only engineering rationale log
           out-of-scope-defects.md          # unrelated defects discovered during work
@@ -141,6 +151,12 @@ stored path rather than reconstructing it from memory.
   "plan_snapshot": "<run-root>/plan/snapshots/0001-intake-example.md",
   "plan_source_sha256": "<sha256>",
   "orchestrator_id": "claude-opus-main",
+  "orchestrator": {
+    "harness": "claude-code",
+    "session_id": "abc123",
+    "adapter": "CLAUDE.md",
+    "checkpoint_mode": "hooked-native"
+  },
   "project_worktree": "/abs/path/to/project-worktree",
   "authority_index": "<run-root>/authority-index.json",
   "handover": "<run-root>/HANDOVER.md",
@@ -151,6 +167,19 @@ stored path rather than reconstructing it from memory.
   "next_action": "resume phase-1-task-1 reviewer round 1 as fixer",
   "decision_sources": ["DOCS/Plans/example.md", "AGENTS.md", "DOCS/Architecture.md"],
   "worker_availability": { "status": "available", "last_incident": null, "next_probe_at": null },
+  "context_checkpoint": {
+    "sequence": 3,
+    "status": "resumed",
+    "checkpoint_path": "<run-root>/compactions/0003/CHECKPOINT.md",
+    "manifest_path": "<run-root>/compactions/0003/resume-manifest.json",
+    "created_at": "2026-08-05T14:10:00Z",
+    "resumed_at": "2026-08-05T14:12:00Z",
+    "reason": "context-threshold",
+    "context_percent": 67,
+    "harness": "claude-code",
+    "continuity_verified": true,
+    "preserved_next_action": "launch phase-1-task-2 implementer"
+  },
   "phases": {
     "phase-1": {
       "status": "in-progress",
@@ -234,12 +263,29 @@ exact `next_action`. `state.json` is the source of truth **inside that run**;
 artifacts are the evidence.
 
 
-### Authority cache and resume fast path
+### Authority cache, handover, and resume fast path
 
 `authority-index.json` records every governing plan/document/config/prompt-library
-path with its content hash and a concise authority summary. `HANDOVER.md` records
-the active phase/task, latest accepted Decision Packets, open major findings,
-worker availability, exact `next_action`, and the paths needed to continue.
+path with its content hash and a concise authority summary.
+
+`HANDOVER.md` is the small, live continuity packet. Maintain it incrementally
+rather than reconstructing it at compaction time. It records:
+
+- run/plan/worktree identity and authoritative snapshot;
+- project ethos or non-regression rules easy to lose;
+- user instructions introduced during this run;
+- current phase/task/remediation cycle;
+- recent accepted Decision Packet paths;
+- important learned architecture or harness quirks;
+- material corrections and major-log ids;
+- active worker/session/report paths;
+- open disputed facts or human requirements;
+- one exact `next_action` and actions forbidden on resume.
+
+Do not copy complete task reports, raw logs, large artifacts, or the full plan into
+`HANDOVER.md`. Routine task transitions normally require only updating current
+state and `next_action`; rewrite handover prose only when continuity meaningfully
+changes.
 
 On resume, read `HANDOVER.md`, `state.json`, `plan-reference.md`, and the relevant
 Decision Packets first. Compare hashes mechanically. Re-read only files that
@@ -252,6 +298,30 @@ When a companion template file is unchanged, read only the required role section
 or use its recorded template hash/version. This resume fast path is the default;
 full-context reconstruction is reserved for missing, stale, or contradictory
 state.
+
+### Context checkpoints
+
+Use `COMPACTION.md` for the full protocol and `HARNESS.md` for adapter selection.
+Each checkpoint is an immutable directory under `compactions/`. The helper
+snapshots live state, handover, plan reference, and authority index and writes a
+small resume manifest. It does not replace the live run files.
+
+Valid checkpoint states are:
+
+- `prepared` — immutable checkpoint exists;
+- `compacting` — native compaction was requested or started;
+- `rehydration-required` — native compaction or session replacement completed;
+- `resumed` — identity and continuity were verified;
+- `compaction-failed` — checkpoint remains valid but native compaction failed.
+
+While checkpoint status is `prepared`, `compacting`, or
+`rehydration-required`, perform no project work. Complete compaction/rehydration
+first. After rehydration, compare live hashes, revalidate active workers, run
+`verify-resume`, and execute live `next_action` immediately.
+
+Hooks must resolve the exact run through `DSD_RUN_ROOT`, a matching orchestrator
+session id, or one unambiguous active run. They must not guess among multiple
+active runs.
 
 ### Decision Packets and evidence loading
 
@@ -422,7 +492,7 @@ Log an item when it includes one or more of the following:
   cross-task behavior, or future-phase assumptions;
 - a consequential design decision or rejected alternative;
 - invalidation or preservation of previously accepted evidence;
-- an escalation, worker-availability incident, human blocker, or direct orchestrator intervention;
+- an escalation, worker-availability incident, human blocker, or orchestrator phase-gate/remediation decision;
 - a material correction to a previously reported claim, measurement, or decision;
 - a major out-of-scope defect that affects planning or later work.
 
@@ -455,7 +525,7 @@ share the same root cause. Each entry should contain, as applicable:
 Workers append entries for major findings and fixes they discover or perform.
 A reviewer that raises a major finding logs the finding; the resumed or fallback
 fixer appends a linked fix entry. The main orchestrator logs its own phase-level findings, plan changes,
-availability decisions, human escalations, direct repairs, and the reasoning
+availability decisions, human escalations, remediation plans, and the reasoning
 behind accepting or rejecting consequential solutions. At each task and phase
 gate, the orchestrator checks that required entries exist and link back to the detailed
 reports rather than trusting the log as a substitute for evidence.

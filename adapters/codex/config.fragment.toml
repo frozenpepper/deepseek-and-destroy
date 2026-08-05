@@ -1,0 +1,8 @@
+# Optional. Use only when the active model context window is known accurately.
+# Example for a 200000-token context window at the DSD default 65% threshold:
+# model_context_window = 200000
+# model_auto_compact_token_limit = 130000
+model_auto_compact_token_limit_scope = "total"
+
+[features]
+hooks = true

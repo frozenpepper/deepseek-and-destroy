@@ -110,6 +110,23 @@ def main() -> int:
     if availability.get("status") == "waiting-for-worker" and not availability.get("next_probe_at"):
         errors.append("worker_availability waiting-for-worker requires next_probe_at")
 
+    checkpoint = state.get("context_checkpoint") or {}
+    checkpoint_status = str(checkpoint.get("status", "none")).lower()
+    valid_checkpoint_statuses = {
+        "none", "prepared", "compacting", "rehydration-required", "resumed", "compaction-failed"
+    }
+    if checkpoint_status not in valid_checkpoint_statuses:
+        errors.append(f"invalid context_checkpoint status: {checkpoint_status}")
+    if checkpoint_status in {"prepared", "compacting", "rehydration-required", "resumed", "compaction-failed"}:
+        if not checkpoint.get("sequence"):
+            errors.append(f"context_checkpoint {checkpoint_status} requires sequence")
+        if not existing(checkpoint.get("checkpoint_path"), base):
+            errors.append(f"context_checkpoint {checkpoint_status} requires existing checkpoint_path")
+        if not existing(checkpoint.get("manifest_path"), base):
+            errors.append(f"context_checkpoint {checkpoint_status} requires existing manifest_path")
+    if checkpoint_status == "resumed" and not checkpoint.get("continuity_verified"):
+        errors.append("context_checkpoint resumed requires continuity_verified=true")
+
     any_live = False
     for phase_id, phase in (state.get("phases") or {}).items():
         for task_id, task in (phase.get("tasks") or {}).items():
@@ -124,8 +141,17 @@ def main() -> int:
 
     if args.for_turn_exit and status not in TERMINAL:
         waiting = availability.get("status") == "waiting-for-worker" and bool(availability.get("next_probe_at"))
-        if not any_live and not waiting:
-            errors.append("turn-exit invariant failed: active run has no live worker and no persisted wait/probe")
+        compacting = checkpoint_status == "compacting" and bool(
+            checkpoint.get("compacting_at") or checkpoint.get("compaction_requested_at")
+        )
+        if not any_live and not waiting and not compacting:
+            errors.append(
+                "turn-exit invariant failed: active run has no live worker, persisted wait/probe, or active compaction"
+            )
+        if checkpoint_status in {"prepared", "rehydration-required"}:
+            errors.append(
+                f"turn-exit invariant failed: checkpoint is {checkpoint_status}; complete compaction/rehydration first"
+            )
 
     if errors:
         for error in errors:

@@ -12,6 +12,9 @@ metadata:
   workspace-root: DeepSeekAndDestroy
   pass-standard: zero task-relevant findings
   completion-contract: plan-complete-or-human-blocked
+  context-checkpoint-due-percent: "65"
+  context-compact-before-percent: "75"
+  context-hard-ceiling-percent: "80"
 ---
 
 # DeepSeek and Destroy
@@ -278,8 +281,14 @@ The skill folder contains required operational detail:
 - **`WORKSPACE.md`** — run namespaces, plan snapshots, concurrent-orchestrator
   safety, state fields, and major findings/fixes logging;
 - **`PROMPTS.md`** — Common Rules and exact worker prompt templates;
-- **`OPENCODE.md`** — default OpenCode profile and isolated ephemeral database
-  behavior; read only when the effective worker harness is OpenCode;
+- **`HARNESS.md`** — assesses the main orchestrator harness and selects the best
+  context-checkpoint adapter;
+- **`COMPACTION.md`** — harness-neutral durable context checkpoint and rehydration
+  protocol;
+- **`CODEX.md`** — Codex orchestrator compaction hooks and activation;
+- **`CLAUDE.md`** — Claude Code orchestrator compaction hooks and activation;
+- **`OPENCODE.md`** — default OpenCode worker profile, isolated ephemeral database
+  behavior, and OpenCode orchestrator compaction plugin;
 - **`CONFIG.example.md`** — optional configuration examples;
 - **`README.md`** — installation and usage guide;
 - **`scripts/check_state.py`** — optional run-state/turn-exit consistency helper;
@@ -287,15 +296,61 @@ The skill folder contains required operational detail:
 - **`scripts/scope_snapshot.py`** — optional content-hash capture/compare helper
   for scope baselines and reportless-worker recovery;
 - **`scripts/decision_packet.py`** — extracts the compact Decision Packet from
-  worker reports so the orchestrator does not load full reports by default.
+  worker reports so the orchestrator does not load full reports by default;
+- **`scripts/detect_harness.py`** — conservatively identifies the main
+  orchestrator harness and its checkpoint capabilities;
+- **`scripts/install_compaction_adapter.py`** — installs the best project-local
+  Codex, Claude Code, or OpenCode checkpoint adapter;
+- **`scripts/context_checkpoint.py`** — creates immutable context checkpoints and
+  verifies post-compaction continuity.
 
 Read `WORKSPACE.md` during intake. Read `PROMPTS.md` before the first worker
-spawn and whenever auditing a stored prompt. Read `OPENCODE.md` only if the
-effective profile uses OpenCode.
+spawn and whenever auditing a stored prompt. During intake, read `HARNESS.md`,
+resolve the **orchestrator** harness independently from worker routing, and install
+or verify its adapter. Read the selected harness adapter and `COMPACTION.md`.
+Read `OPENCODE.md` whenever either the orchestrator or effective worker profile
+uses OpenCode.
 
 If a companion file required by the effective configuration is unavailable,
 do not improvise a weaker protocol. Recover it or mark the run `HUMAN-BLOCKED`
 with the missing path.
+
+## Context checkpoint contract
+
+Long orchestrator runs must not rely on native conversation summaries to preserve
+continuity. Use the external protocol in `COMPACTION.md`.
+
+At intake:
+
+1. identify the main orchestrator harness using explicit configuration, the
+   current session identity, and `scripts/detect_harness.py`;
+2. record the harness separately from worker profiles;
+3. install or verify the strongest project-local adapter with
+   `scripts/install_compaction_adapter.py`;
+4. keep `HANDOVER.md` concise and incrementally current.
+
+Default context policy:
+
+- checkpoint becomes due at 65% when context use is measurable;
+- compact at the next safe orchestration boundary, normally before 75%;
+- start no new substantial plan-wide reasoning at 80%;
+- when percentage is unavailable, rely on native PreCompact hooks plus periodic
+  safe-boundary checkpoints, default every 4 accepted tasks and before a long
+  phase gate.
+
+Checkpointing is mostly mechanical. Do not spend orchestrator context rebuilding
+state, copying reports, or rewriting the plan. `context_checkpoint.py` snapshots
+live state, handover, plan reference, and authority index. The orchestrator adds
+only non-reconstructible continuity deltas such as new user instructions,
+important learned quirks, major decisions, or corrected assumptions.
+
+After native compaction or a replacement session, no project work may continue
+until the skill, live handover, state, latest checkpoint, and plan identity are
+reloaded; active workers are revalidated; and `verify-resume` marks continuity
+restored. Then execute the persisted `next_action` immediately.
+
+A checkpoint or compaction is not a terminal state and is not a reason to ask the
+user to continue.
 
 ## Default execution policy
 
@@ -317,6 +372,9 @@ with the missing path.
 - Task acceptance: fast-path from a credible independent PASS; no orchestrator
   re-review, code inspection, artifact re-analysis, or test rerun.
 - User-facing progress: sparse and concise; detailed evidence stays in run files.
+- Orchestrator context checkpoint: due at 65%, compact by the next safe boundary
+  before 75%, with an 80% hard ceiling when measurable; otherwise use the
+  harness-native hook and periodic safe-boundary fallback.
 - Task-specific prompt material: minimum sufficient envelope referencing durable
   briefs; do not inline large reports or artifacts.
 
@@ -830,6 +888,9 @@ single human action required, run path, and exact `next_action`.
   engineering rationale stay in run artifacts.
 - On resume, use hashes and compact Decision Packets; do not reload unchanged
   plans, documentation, prompt libraries, or the full run history.
+- Treat native compaction summaries as advisory. If the run has a prepared,
+  compacting, or rehydration-required checkpoint, complete rehydration before any
+  project work and execute the persisted `next_action` immediately afterwards.
 - Use project documentation and plan ethos to make ordinary decisions.
 - Ask humans only for genuinely human problems.
 - Never substitute the orchestrator for unavailable workers.

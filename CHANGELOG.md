@@ -138,3 +138,16 @@ The existing multi-orchestrator run layout, immutable plan references, major
 findings/fixes log, reviewer-led repair, fresh re-review, liveness checks,
 transport separation, preservation baselines, defect ledger, and validation
 independence remain in place.
+
+## v10 — Durable context checkpoints and harness adapters
+
+- Added a harness-neutral Context Checkpoint Protocol for long orchestrator runs.
+- Added configurable 65% checkpoint, 75% compact-before, and 80% hard-ceiling defaults.
+- Made `HANDOVER.md` incrementally maintained so compaction does not require a large rewrite.
+- Added immutable per-run `compactions/<sequence>/` snapshots and resume manifests.
+- Added separate main-orchestrator harness detection; worker harness routing remains independent.
+- Added Codex, Claude Code, and OpenCode orchestrator adapter documentation.
+- Added project-local adapter templates and an idempotent installer.
+- Added `detect_harness.py` and `context_checkpoint.py` helpers.
+- Extended `check_state.py` with checkpoint-state and turn-exit invariants.
+- Added a generic fresh-session fallback when native compaction is absent or fails.

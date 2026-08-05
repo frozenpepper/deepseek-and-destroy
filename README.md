@@ -289,7 +289,7 @@ It records the important stuff future agents should not have to rediscover:
 - rejected alternatives when they matter;
 - verification and remaining risks;
 - worker availability incidents;
-- orchestrator interventions and human escalations.
+- orchestrator phase-gate decisions, remediation plans, and human escalations.
 
 It is not a transcript and not hidden chain-of-thought. It is a concise,
 evidence-linked engineering record.
@@ -327,11 +327,22 @@ deepseek-and-destroy/
 ├── README.md
 ├── WORKSPACE.md
 ├── PROMPTS.md
+├── HARNESS.md
+├── COMPACTION.md
+├── CODEX.md
+├── CLAUDE.md
 ├── OPENCODE.md
 ├── CONFIG.example.md
 ├── CHANGELOG.md
+├── adapters/
+│   ├── codex/
+│   ├── claude/
+│   └── opencode/
 └── scripts/
     ├── check_state.py
+    ├── context_checkpoint.py
+    ├── detect_harness.py
+    ├── install_compaction_adapter.py
     ├── decision_packet.py
     ├── opencode_probe.py
     └── scope_snapshot.py
@@ -343,9 +354,12 @@ The companion files keep the core readable:
 
 - `WORKSPACE.md` — state, plans, concurrency, logging;
 - `PROMPTS.md` — exact implementer/reviewer/fixer prompts;
-- `OPENCODE.md` — OpenCode-specific worker adapter;
-- `CONFIG.example.md` — optional model, routing, and project rules;
+- `HARNESS.md` and `COMPACTION.md` — orchestrator harness selection and durable context checkpoints;
+- `CODEX.md`, `CLAUDE.md`, and `OPENCODE.md` — harness-specific adapters;
+- `CONFIG.example.md` — optional model, routing, project, and checkpoint rules;
 - `scripts/check_state.py` — optional Stop-hook/state invariant checker;
+- `scripts/context_checkpoint.py` — immutable checkpoint and rehydration helper;
+- `scripts/detect_harness.py` and `install_compaction_adapter.py` — adapter selection and project-local installation;
 - `scripts/opencode_probe.py` — isolated exact-model health probe;
 - `scripts/scope_snapshot.py` — mechanical content-hash baseline and comparison.
 
@@ -603,3 +617,34 @@ evidence synthesis. Use small helpers for mechanical state, hashing, liveness, a
 health checks. Preserve evidence, decisions, and recovery state. Keep moving
 without demanding ceremonial “continue” prompts. Stop only when the plan is
 actually complete or the remaining problem genuinely belongs to a human.
+
+## Long runs do not have to trust amnesia
+
+DeepSeek and Destroy can outlive a healthy orchestrator context window. The skill
+therefore uses an external **Context Checkpoint Protocol** rather than hoping the
+harness's automatic summary remembers every important user instruction, project
+quirk, active worker, and exact next action.
+
+The default policy is:
+
+- checkpoint at 65% when context use is measurable;
+- compact at the next safe orchestration boundary, normally before 75%;
+- begin no new substantial phase-level reasoning at 80%;
+- when percentage is unavailable, rely on native hooks plus periodic checkpoints.
+
+The important optimization is that the orchestrator does not write a giant new
+handover from memory each time. `HANDOVER.md` stays small and is maintained
+incrementally. A helper snapshots it together with `state.json`, the plan
+reference, and the authority index. After compaction, the skill reloads those
+files, verifies live state, and immediately continues from `next_action`.
+
+The skill detects whether the main orchestrator is Codex, Claude Code, OpenCode,
+or an unknown/custom harness and installs the strongest project-local adapter:
+
+```bash
+python3 <skill-root>/scripts/install_compaction_adapter.py \
+  --harness auto \
+  --project-root <project-root>
+```
+
+See `HARNESS.md`, `COMPACTION.md`, and the selected harness adapter for details.
