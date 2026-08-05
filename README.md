@@ -648,3 +648,12 @@ python3 <skill-root>/scripts/install_compaction_adapter.py \
 ```
 
 See `HARNESS.md`, `COMPACTION.md`, and the selected harness adapter for details.
+---
+
+## License
+
+DeepSeek and Destroy is released under the [MIT License](LICENSE). Use it,
+modify it, fork it, redistribute it, bundle it into commercial tools, or sell
+services built around it. Keep the copyright and license notice with copies or
+substantial portions of the software.
+

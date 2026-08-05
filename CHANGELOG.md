@@ -1,4 +1,9 @@
 # Changelog
+## Unreleased
+
+- Added the canonical root `LICENSE` file for the MIT License already declared in `SKILL.md`.
+- Added an explicit README license section covering permitted reuse, modification, redistribution, and commercial use.
+
 
 ## Prescribed-construction and progress-watch revision
 
