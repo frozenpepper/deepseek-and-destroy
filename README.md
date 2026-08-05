@@ -532,6 +532,24 @@ wait/probe, or a legitimate terminal state. Future tense is not a process.
 
 ---
 
+## Prescribe large mechanical refactors
+
+Cheap workers are excellent executors, but a large extraction or migration can
+burn an entire context rediscovering a design that was already decided. For that
+kind of work, DeepSeek and Destroy uses **prescription over instruction**:
+
+- a Surveyor or Discovery Worker writes a durable construction brief;
+- the brief names exact files, symbols, moves, wiring, exclusions, and first edit;
+- the implementer verifies local assumptions and starts writing instead of
+  reopening the architecture question.
+
+A first long attempt that analyses heavily and changes nothing is treated as a
+scoping signal. The same vague prompt is not launched again.
+
+Scope baselines are rolling per-attempt snapshots of the immediately previous
+accepted tree. They are refreshed after accepted changes; immutable behavior
+preservation evidence is not.
+
 ## Frequently asked questions
 
 ### Do I have to use DeepSeek?

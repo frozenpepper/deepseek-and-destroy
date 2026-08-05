@@ -156,11 +156,20 @@ using the opencode harness:
   Interpret the signals:
 
   - **dead:** process absent;
-  - **alive/slow:** CPU accumulates or output/report grows; keep waiting even if the
-    other signal is quiet;
+  - **alive/slow:** CPU accumulates materially or output/report/checkpoint grows;
   - **probable wedge:** substantial elapsed time, process still present, and both
-    CPU and output remain effectively unchanged across repeated windows;
+    CPU progress and durable output remain negligible across repeated windows;
   - **unknown:** collect another window rather than guessing.
+
+  Startup liveness and continued progress are different. CPU movement can prove a
+  process started, but a tiny CPU crawl with no log, report, checkpoint, or changed
+  path for a prolonged configurable window may still be a hung-but-alive worker.
+  After startup, monitor rolling progress using all available signals: process
+  existence, CPU delta, log/report/checkpoint growth, and expected changed-path
+  activity. Default to another observation window when uncertain; classify a
+  probable wedge only after repeated negligible progress, then use graceful stop,
+  suspect-tree recovery, and task re-scope rather than waiting indefinitely.
+  Do not use static log growth alone because redirected output may be buffered.
 
   A report file appearing is not completion. Wait for process exit or a reliable
   harness completion event before declaring logs/major entries absent or capturing
@@ -173,6 +182,13 @@ using the opencode harness:
   `SIGTERM` only if necessary; reserve `SIGKILL` for a runaway process that cannot
   be stopped safely. After any forced or reportless exit, apply the suspect-tree
   protocol in `WORKSPACE.md`.
+
+- **Resume retry:** when a configured `--session` launch immediately reports
+  `process absent`, missing session, or an equivalent transient launch failure,
+  retry the exact resume once after a short delay with the same absolute
+  `OPENCODE_DB` and session id. If the second attempt fails, treat continuation as
+  unavailable and use the configured fresh-fixer fallback. Do not spend the full
+  transport budget repeatedly probing a session that cannot be resolved.
 
 - **Provider health probe and recovery:** before spending repeated task attempts on
   similar banner-only, empty, or provider errors, verify the exact model identifier

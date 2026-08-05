@@ -98,6 +98,14 @@ The main orchestrator is never an implicit worker-availability fallback.
   and phase evidence synthesis to cheap workers; judge their durable reports.
 - Keep unresolved product and architecture decisions with the main orchestrator.
 
+## Construction policy
+
+- For decided multi-file extraction/migration/refactor work, require a durable
+  construction brief with exact files, symbols, boundaries, wiring, exclusions,
+  first edit, and verification.
+- A first substantial zero-change analytical death triggers immediate re-scope or
+  prescription; do not retry the same open-ended prompt.
+
 ## Implementation rules
 
 - Follow the project's existing architecture and conventions.
@@ -133,6 +141,8 @@ The main orchestrator is never an implicit worker-availability fallback.
 - Review-round budget: 5
 - Immediate transport-attempt budget: 5
 - Startup-liveness grace: 90 seconds
+- Ongoing-progress window: 10 minutes before a repeated multi-signal wedge assessment
+- Resume launch retry: 1 exact retry after a short delay
 - Provider re-probe interval: 5 minutes, increasing with bounded backoff
 - Soft worker cap: warn/finalize before hard cap; graceful stop before kill
 - Default execution: sequential

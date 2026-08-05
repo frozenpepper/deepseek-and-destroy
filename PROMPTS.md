@@ -151,6 +151,10 @@ KNOWN VERIFIED FACTS — verify, do not blindly accept:
 DISCOVERY SPEC / DECISION BRIEF (exact path plus only a short essential excerpt):
 {discovery_spec}
 
+PRESCRIBED CONSTRUCTION MAP (for decided mechanical refactors; exact files,
+symbols, moves/wiring, non-goals, and first edit; otherwise N/A):
+{construction_map}
+
 EXPECTED SCOPE — subsystem/files anticipated; justify any necessary expansion:
 {scope}
 
@@ -186,8 +190,10 @@ WHEN WORKING:
 1. Perform the supplied first action, create {report_path} early, and append
    verified facts, changes, and evidence as you proceed. Reach the supplied first
    durable checkpoint before broadening investigation. For a bounded implementation
-   task, do not restart a broad repository investigation that the discovery spec
-   or known facts already completed.
+   task, do not restart a broad repository investigation that the discovery spec,
+   construction map, or known facts already completed. When a construction map is
+   supplied, verify its immediate local assumptions and start writing; do not spend
+   the session redesigning an already-decided mechanical boundary.
 2. Before writing code, verify the specific existing modules you are meant to
    extend and trace the relevant uses (Rule 2 of the ABSOLUTE RULES).
 3. Implement the task fully against the acceptance criteria. No stubs, no

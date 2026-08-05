@@ -460,6 +460,31 @@ Task size includes more than code volume:
 The roughly 30-minute tool-heavy heuristic remains a warning, but unit count and
 evidence volume are stronger signals.
 
+### Prescription over instruction for mechanical construction
+
+When the design is already decided and the work is a large extraction, migration,
+rewire, or other mechanical refactor, do not give the implementer an open-ended
+instruction to rediscover the design. First obtain a durable **construction brief**
+from accepted project evidence or a Discovery Worker. The brief should prescribe:
+
+- exact source and destination files;
+- exact symbols, responsibilities, and boundaries to move or preserve;
+- expected wiring/import/export changes;
+- explicit non-goals and files that must not move;
+- the first edit and first durable checkpoint;
+- acceptance and verification commands.
+
+The orchestrator approves the boundary but does not personally perform the bulk
+investigation needed to produce it. Pass the durable brief by path and tell the
+implementer to verify its claims locally, not to restart broad design discovery.
+
+A first worker attempt that spends substantial time analysing, produces zero
+intended project changes, and dies/hangs without a substantive blocker is a
+**decomposition signal**, not an anomaly. Do not retry the same open-ended prompt.
+Immediately split the unit, commission missing discovery, or relaunch from a more
+prescriptive construction brief. Transport-only failures remain governed by the
+separate availability policy.
+
 ### Discovery is a durable task, not an implementation preamble
 
 When implementation depends on understanding an unfamiliar subsystem, delegate a
@@ -520,10 +545,14 @@ For each dependency-ready task:
 2. **Capture mechanical baselines.** Use `scripts/scope_snapshot.py`, equivalent
    VCS/hash tooling, or a cheap bounded baseline worker to record content hashes,
    expected paths, relevant untracked files, and a broader changed-path inventory.
-   The orchestrator verifies that the baseline exists and matches the declared
-   scope; it need not manually hash and inspect every file. For refactors of
-   accepted work, preserve immutable behavior evidence and prohibit changing it
-   to hide a mismatch.
+   A scope baseline is **per mutating attempt** and must describe the immediately
+   previous accepted tree state. Refresh it after every accepted mutation and
+   before every new implementer or fixer; never reuse a stale baseline from an
+   earlier task or pre-fix state. The orchestrator verifies that the baseline
+   exists and matches the declared scope; it need not manually hash and inspect
+   every file. Keep this rolling scope baseline distinct from immutable behavior
+   preservation evidence. For refactors of accepted work, preserve that immutable
+   evidence and prohibit changing it to hide a mismatch.
 3. **Check concurrency.** Ensure no active run can edit overlapping source in the
    same worktree.
 4. **Spawn worker.** Resolve the exact profile and prepare state, then launch.
@@ -566,9 +595,12 @@ For each dependency-ready task:
     Discovery, or Recovery worker. The orchestrator does not inspect the code,
     rerun tests, reparse artifacts, or rederive counts itself.
 11. **Repair FAIL.** Normally resume that reviewer so it retains judgment-shaped
-    evidence. If the review consumed a heavy context through large artifacts,
-    browser batteries, mutation tests, broad bisects, or a full suite, use a fresh
-    fixer with the findings embedded instead. The fixer reruns targeted
+    evidence. If a resume launch reports `process absent`, missing session, or an
+    equivalent transient capability error, retry that exact resume once after a
+    short delay before declaring the session unusable. This retry is transport,
+    not a substantive round. If the review consumed a heavy context through large
+    artifacts, browser batteries, mutation tests, broad bisects, or a full suite,
+    use a fresh fixer with the findings embedded instead. The fixer reruns targeted
     verification, writes its fix report, and logs linked fixes.
 12. **Fresh re-review.** A different fresh reviewer validates the repaired result.
 13. **Reassess if the loop does not converge.**
@@ -620,8 +652,13 @@ Resuming means continue execution, not summarize and wait.
    replay the entire run into the orchestrator context.
 3. Verify ownership, worktree, branch, concurrency, and that prior processes can no
    longer write.
-4. Compare the current plan hash to the recorded snapshot. Record intentional
-   revisions; escalate only if a material conflict cannot be resolved.
+4. Compare the current plan hash to the recorded snapshot. When any authoritative
+   plan change is noticed—during resume or mid-run—pause new worker launches long
+   enough to record the old/new hashes, source path, timestamp, reason if known,
+   and a new immutable snapshot. Classify whether the revision changes current
+   scope, criteria, dependencies, or accepted work before continuing. Escalate only
+   if a material conflict cannot be resolved. Do not let a noticed plan revision
+   remain only in chat or memory.
 5. Read and verify `next_action`, then execute it immediately. Never yield after
    merely restating that action; the worker, probe, or wait must actually start.
 6. If `next_action` is stale, reconstruct the first missing transition:
@@ -755,7 +792,8 @@ The main orchestrator is not an implicit worker fallback.
 | Credits/quota exhausted, auth failure, persistent outage | Availability, human action likely | Do not take over; persist resume point; mark HUMAN-BLOCKED |
 | Reviewer reports relevant finding or verification fails | Substantive | Repair and fresh re-review |
 | Review budget exhausted | Substantive reassessment | Re-scope, commission discovery, reroute to a stronger/fresh worker, and continue; never take over |
-| Reviewer session cannot resume but workers function | Capability | Fresh fallback fixer with findings embedded |
+| Reviewer session cannot resume but workers function | Capability | Retry the exact resume once after a short delay; if still unavailable, use a fresh fallback fixer with findings embedded |
+| Worker analysed heavily, changed nothing, and died/hung | Decomposition failure | Do not repeat the same prompt; split or provide a prescribed construction brief |
 | Test tampering or disguised shortcut | Integrity | Revert, log, repair; escalate substantively if repeated |
 | Task likely oversized before launch | Structural/preflight | Split by natural coherent units before the first spawn |
 | Task proves oversized or badly scoped during work | Structural | Re-scope autonomously and continue |

@@ -1,5 +1,22 @@
 # Changelog
 
+## Prescribed-construction and progress-watch revision
+
+Based on a 36-hour run using the same DeepSeek model for orchestrator and workers:
+
+- add **prescription over instruction** for decided large mechanical refactors;
+- require a worker-produced construction brief with exact files, symbols,
+  boundaries, wiring, exclusions, first edit, and verification;
+- treat the first substantial zero-change analytical death as a decomposition
+  failure requiring split/prescription, not an identical retry;
+- distinguish startup liveness from ongoing progress and detect probable
+  hung-but-alive workers through repeated process/CPU/output/checkpoint windows;
+- make scope baselines per-attempt and refresh them against the immediately
+  previous accepted tree while keeping behavior-preservation baselines immutable;
+- retry a flaky session resume exactly once before falling back to a fresh fixer;
+- require immediate plan-hash/snapshot capture whenever an authoritative revision
+  is noticed mid-run.
+
 ## v8 — Worker authority and phase-remediation gates
 
 - Made the worker/orchestrator boundary absolute: workers establish technical

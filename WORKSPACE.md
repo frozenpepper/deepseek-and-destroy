@@ -93,12 +93,13 @@ Each run owns `plan/plan-reference.md`. Record, clearly and human-readably:
 - every later plan revision, with old/new hashes, reason, timestamp, and a new
   immutable snapshot path.
 
-Never overwrite a plan snapshot. On resume, compare the current source with the
-recorded hash. If it changed, determine whether the change is intentional before
-continuing, record the decision, and capture a new snapshot. If the original
-source is unavailable, the stored snapshot preserves the exact plan used, but the
-run must state that it is continuing from the snapshot rather than pretending the
-live source was checked.
+Never overwrite a plan snapshot. On resume—and immediately whenever a plan change
+is noticed mid-run—compare the current source with the recorded hash. Before any
+new worker launch, record the old/new hashes, capture a new immutable snapshot,
+and classify the effect on current scope, criteria, dependencies, and accepted
+work. If the original source is unavailable, the stored snapshot preserves the
+exact plan used, but the run must state that it is continuing from the snapshot
+rather than pretending the live source was checked.
 
 ### Concurrent-orchestrator protocol
 
@@ -310,7 +311,10 @@ visible before new work is scheduled.
 ### Scope baseline and crash-damage protocol
 
 Before every mutating worker spawn, use `scripts/scope_snapshot.py`, equivalent
-VCS/hash tooling, or a cheap bounded baseline worker to record:
+VCS/hash tooling, or a cheap bounded baseline worker to record a **new per-attempt
+scope baseline** against the immediately previous accepted tree state. Never reuse
+an older task baseline after another accepted task or fix has changed the tree.
+Record:
 
 - cryptographic hashes for every existing declared in-scope file;
 - the expected path set, including expected new paths;
@@ -319,8 +323,10 @@ VCS/hash tooling, or a cheap bounded baseline worker to record:
   outside the declared scope.
 
 This is mechanical evidence collection. The orchestrator verifies the declared
-scope and that a baseline artifact exists; it should not manually hash and inspect
-every file.
+scope and that a current baseline artifact exists; it should not manually hash and
+inspect every file. Rolling scope baselines are disposable attempt evidence;
+behavior-preservation baselines remain immutable and are not refreshed merely
+because accepted implementation changed the tree.
 
 `git status --porcelain` is useful only for discovering path names. Its status
 letters do not prove content stability: an already-modified file remains `M`, and
