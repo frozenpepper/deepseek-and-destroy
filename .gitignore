@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+
+# Runtime artifacts of running/installing the skill against this repo itself
+# (DeepSeekAndDestroy/ is a per-project run workspace; .kilo/ is what
+# scripts/install_kilo_agents.py writes) -- neither belongs in the skill
+# package's own history.
+DeepSeekAndDestroy/
+.kilo/

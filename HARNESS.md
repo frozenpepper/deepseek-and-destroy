@@ -6,7 +6,7 @@ It is independent from the harness used to launch worker agents.
 ## Assessment sequence
 
 1. Use an explicit user/config value when present:
-   `orchestrator_harness: codex | claude-code | opencode | custom`.
+   `orchestrator_harness: codex | claude-code | opencode | kilo | custom`.
 2. Otherwise inspect the current session/system context.
 3. Run the conservative detector:
 
@@ -27,7 +27,16 @@ It is independent from the harness used to launch worker agents.
 | Codex | yes | yes | `SessionStart` source `compact` | `CODEX.md` |
 | Claude Code | yes | yes | `SessionStart` matcher `compact` | `CLAUDE.md` |
 | OpenCode V2 | plugin pre-compaction hook | no documented post hook | skill/state invariant plus injected compaction context | `OPENCODE.md` |
+| Kilo Code | experimental, unconfirmed | experimental, unconfirmed | manual/fresh-session handoff confirmed; plugin hook untested | `KILOCODE.md` |
 | Other/unknown | unknown | unknown | manual/fresh-session handoff | `COMPACTION.md` |
+
+Kilo Code's own bundled CLI runtime references the same plugin hook name
+OpenCode uses (`session.compacting`) closely enough that an experimental
+adapter is worth shipping — but that is evidence the mechanism *might* work,
+not confirmation that it does. No live Kilo run has verified a checkpoint
+actually gets prepared when Kilo's native compaction fires. Treat Kilo as
+"Other/unknown"-tier (manual/fresh-session mode) for anything you cannot
+afford to lose continuity on, until the plugin path is confirmed empirically.
 
 ## Project-local installation
 
@@ -47,7 +56,8 @@ The installer:
 - detects or uses the explicit orchestrator harness;
 - copies `context_checkpoint.py` to
   `DeepSeekAndDestroy/tools/context_checkpoint.py`;
-- installs/merges the project-local Codex or Claude hooks, or the OpenCode plugin;
+- installs/merges the project-local Codex or Claude hooks, or the OpenCode/Kilo
+  plugin (the Kilo plugin is experimental — see the capability matrix above);
 - backs up modified JSON configuration files;
 - writes `DeepSeekAndDestroy/compaction-adapter-installation.md`.
 
