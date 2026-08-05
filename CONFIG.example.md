@@ -21,6 +21,24 @@ variables.
 - Safe stop: terminate only the uniquely identified run
 - Suitable roles: phase surveyor, discovery, implementer, verification, reviewer, fixer, re-reviewer, recovery auditor, phase auditor, phase worker
 
+### Profile: DeepSeek Worker (Kilo Code)
+
+- Harness: Kilo Code native subagent (see `KILOCODE.md`)
+- Endpoint: DeepSeek provider configured via `kilo auth`
+- Model: `deepseek/deepseek-v4-flash` (direct provider — not the `kilo/deepseek/...` gateway/credits namespace)
+- Agent: `deepseek-worker`, registered at `.kilocode/agents/deepseek-worker.md` or `~/.kilocode/agents/deepseek-worker.md`
+- Reasoning level: default
+- Fresh launch: native `task` tool call with `agent="deepseek-worker"`; no process/PID/ephemeral-DB management needed
+- Resume: fresh delegation with prior findings embedded (see `KILOCODE.md` for the unresolved native-resume question)
+- Positive liveness: the `task` call returning is completion; no separate liveness probe
+- Health probe: trivial delegated `HEALTHCHECK OK` task before spending a real attempt after suspected provider trouble
+- Safe stop: not applicable — no detached process exists to stop
+- Suitable roles: phase surveyor, discovery, implementer, verification, reviewer, fixer, re-reviewer, recovery auditor, phase auditor, phase worker
+
+To make this the effective profile instead of the OpenCode default, set Harness
+to Kilo Code in Role routing below (or reference this profile directly), and
+have the orchestrator itself run as a Kilo Code primary agent.
+
 ### Profile: Backup Worker
 
 - Harness: <Codex, Claude Code, OpenCode, or custom>
