@@ -12,8 +12,8 @@ mode: subagent
 model: {{MODEL}}
 permission:
   edit:
-    "DeepSeekAndDestroy/**": allow
     "*": deny
+    "DeepSeekAndDestroy/**": allow
   webfetch: deny
   websearch: deny
   skill: deny
