@@ -67,7 +67,7 @@ def verify_model(model: str) -> None:
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("`kilo models` timed out") from exc
-    tokens = set(re.findall(r"[A-Za-z0-9._:~-]+/[A-Za-z0-9._:~-]+", result.stdout))
+    tokens = set(re.findall(r"[A-Za-z0-9._:~-]+(?:/[A-Za-z0-9._:~-]+){1,2}", result.stdout))
     if model not in tokens:
         close = sorted(t for t in tokens if model.split("/")[-1].split("-")[0] in t)
         hint = f" Similar available ids: {', '.join(close[:8])}" if close else ""

@@ -1,14 +1,9 @@
-// EXPERIMENTAL -- unverified against a live Kilo session. See KILOCODE.md
-// and HARNESS.md's capability matrix before relying on this.
-//
-// Kilo's bundled CLI runtime references the same "session.compacting" hook
-// name OpenCode's plugin interface uses, which is why this is worth shipping
-// at all -- but no live Kilo run has confirmed the hook actually fires, what
-// shape `output` has, or where Kilo expects a local (non-npm-published)
-// plugin file to live. Verify empirically before trusting this for a run you
-// can't afford to lose continuity on; until then, treat Kilo as
-// manual/fresh-session mode per HARNESS.md.
-import type { Plugin } from "@opencode-ai/plugin"
+// EXPERIMENTAL -- package, export shape, hook signature, and ctx fields are
+// confirmed against @kilocode/plugin 7.4.20 and a live Kilo server. NOT yet
+// confirmed: this hook firing during a real mid-session compaction event
+// (only load-at-session-start was tested). See KILOCODE.md and HARNESS.md's
+// capability matrix before relying on this for a run you can't afford to lose.
+import type { Plugin } from "@kilocode/plugin"
 
 export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => {
   return {

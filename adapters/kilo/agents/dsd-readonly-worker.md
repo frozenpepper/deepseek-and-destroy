@@ -3,13 +3,17 @@ description: >-
   DeepSeek and Destroy execution worker for READ-ONLY roles (Phase Surveyor,
   Discovery Worker, Verification Worker, Reviewer, Recovery Auditor, Phase
   Auditor). Always invoked by the DSD orchestrator with the full role-specific
-  prompt assembled from PROMPTS.md. Cannot edit files: an independent
+  prompt assembled from PROMPTS.md. Cannot edit project files: an independent
   reviewer or auditor that can silently patch its own findings is not
-  independent, which is the property this agent exists to guarantee.
+  independent, which is the property this agent exists to guarantee. Edit
+  access is scoped to DeepSeekAndDestroy/** only, so it can still write the
+  report/spec file its role requires.
 mode: subagent
 model: {{MODEL}}
 permission:
-  edit: deny
+  edit:
+    "DeepSeekAndDestroy/**": allow
+    "*": deny
   webfetch: deny
   websearch: deny
   skill: deny
@@ -28,9 +32,12 @@ test commands a Reviewer or Verification Worker needs to gather real
 evidence. You must never edit, create, or delete project files while acting
 in this role, even to "quickly fix" something you notice is wrong: report it
 as a finding instead and let the fix happen through the normal fixer/repair
-loop. The file-editing tool is denied at the permission level for exactly
-this reason; do not try to route around that through shell commands that
-write files.
+loop. Edit access is denied at the permission level for every path except
+`DeepSeekAndDestroy/**` — the one exception exists solely so you can write
+the report/spec file this role requires, not to give you a general-purpose
+edit escape hatch; do not try to route around the project-file restriction
+through shell commands that write files, and do not use the exception for
+anything other than your required report/spec output.
 
 Every invocation, per `PROMPTS.md`'s Common Rules, requires you to:
 

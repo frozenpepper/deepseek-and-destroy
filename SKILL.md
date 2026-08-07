@@ -303,7 +303,7 @@ The skill folder contains required operational detail:
 - **`scripts/detect_harness.py`** — conservatively identifies the main
   orchestrator harness and its checkpoint capabilities;
 - **`scripts/install_compaction_adapter.py`** — installs the best project-local
-  Codex, Claude Code, or OpenCode checkpoint adapter;
+  Codex, Claude Code, OpenCode, or Kilo Code checkpoint adapter;
 - **`scripts/context_checkpoint.py`** — creates immutable context checkpoints and
   verifies post-compaction continuity;
 - **`scripts/install_kilo_agents.py`** — resolves the effective worker model

@@ -196,16 +196,28 @@ unavailable.
 ## Main-orchestrator context checkpoints in Kilo Code
 
 This section applies when the **main orchestrator** itself runs in Kilo Code.
-It is separate from the worker profile above, and it is **experimental and
-unverified** — see `HARNESS.md`'s capability matrix.
+It is separate from the worker profile above, and it is **experimental** —
+see `HARNESS.md`'s capability matrix.
 
-Kilo's bundled CLI runtime references the same `experimental.session.compacting`
-plugin hook name OpenCode's plugin interface uses. That is evidence a
-pre-compaction adapter is plausible, not confirmation it works: no live Kilo
-run has verified the hook fires, what shape it receives, or where Kilo
-actually expects a local (non-npm-published) plugin file to live.
+Kilo's own `@kilocode/plugin` package (not OpenCode's) declares
+`experimental.session.compacting` with the same input/output shape OpenCode's
+plugin interface uses. Confirmed against `@kilocode/plugin` 7.4.20 and a live
+`kilo serve` session (project-local `.kilo/plugins/*.ts` is auto-discovered
+into resolved config; a plugin placed there is instantiated with the
+documented `ctx` fields — `client`, `project`, `directory`, `worktree`,
+`experimental_workspace`, `serverUrl`, `$` — on session creation; both named-
+and default-export plugin modules load, matching the package's own
+`dist/example.js`, which itself uses a named export). What remains
+unconfirmed is narrower than "does this load at all": whether
+`experimental.session.compacting` actually **fires** when Kilo's own
+token-limit compaction triggers mid-session — only load-at-session-start has
+been exercised, not a real compaction event. There is also a separate
+`experimental.compaction.autocontinue` hook, fired after compaction succeeds
+and before Kilo's synthetic "continue" turn; it is declared in the SDK types
+but this adapter does not use it (it only toggles whether that synthetic turn
+happens, so it isn't a substitute for context injection).
 
-Install the experimental adapter:
+Install the adapter:
 
 ```bash
 python3 <skill-root>/scripts/install_compaction_adapter.py \

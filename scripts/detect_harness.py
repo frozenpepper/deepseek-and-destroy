@@ -120,14 +120,18 @@ def capabilities(harness: str) -> dict[str, object]:
     elif harness == "kilo":
         base.update(
             {
-                # Kilo's own bundled runtime references plugin hook names shared
-                # with OpenCode (e.g. "session.compacting"), so a plugin adapter
-                # is plausible -- but no live run has confirmed it actually
-                # fires. Do not upgrade these to True without empirical
-                # verification against a real Kilo session.
-                "precompact_hook": "experimental, unconfirmed",
-                "postcompact_hook": "experimental, unconfirmed",
-                "postcompact_context_injection": "experimental, unconfirmed",
+                # Kilo's own @kilocode/plugin package declares
+                # "experimental.session.compacting" with the same input/output
+                # shape OpenCode's plugin interface uses. Package, export
+                # shape, hook signature, ctx fields, and .kilo/plugins/*.ts
+                # auto-discovery are confirmed against @kilocode/plugin 7.4.20
+                # and a live `kilo serve` session (plugin instantiated on
+                # session creation). NOT confirmed: the hook firing during a
+                # real mid-session compaction event -- do not upgrade these to
+                # True without that specific empirical verification.
+                "precompact_hook": "experimental, wired+loadable; live-fire unconfirmed",
+                "postcompact_hook": "experimental, autocontinue hook declared but unused; live-fire unconfirmed",
+                "postcompact_context_injection": "experimental, live-fire unconfirmed",
                 "manual_compaction": True,
                 "configurable_auto_compact_token_limit": False,
                 "adapter": "KILOCODE.md",

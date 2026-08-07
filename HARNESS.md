@@ -27,16 +27,23 @@ It is independent from the harness used to launch worker agents.
 | Codex | yes | yes | `SessionStart` source `compact` | `CODEX.md` |
 | Claude Code | yes | yes | `SessionStart` matcher `compact` | `CLAUDE.md` |
 | OpenCode V2 | plugin pre-compaction hook | no documented post hook | skill/state invariant plus injected compaction context | `OPENCODE.md` |
-| Kilo Code | experimental, unconfirmed | experimental, unconfirmed | manual/fresh-session handoff confirmed; plugin hook untested | `KILOCODE.md` |
+| Kilo Code | hook wired & confirmed loadable; live-fire unconfirmed | `autocontinue` hook declared, unused by adapter; live-fire unconfirmed | manual/fresh-session handoff confirmed; plugin path experimental | `KILOCODE.md` |
 | Other/unknown | unknown | unknown | manual/fresh-session handoff | `COMPACTION.md` |
 
-Kilo Code's own bundled CLI runtime references the same plugin hook name
-OpenCode uses (`session.compacting`) closely enough that an experimental
-adapter is worth shipping — but that is evidence the mechanism *might* work,
-not confirmation that it does. No live Kilo run has verified a checkpoint
-actually gets prepared when Kilo's native compaction fires. Treat Kilo as
+Kilo ships its own `@kilocode/plugin` package (distinct from OpenCode's),
+which declares `experimental.session.compacting` with the same input/output
+shape OpenCode's plugin interface uses, plus a separate
+`experimental.compaction.autocontinue` fired after compaction succeeds. The
+adapter's package, export shape, hook signature, and `ctx` fields are
+confirmed against `@kilocode/plugin` 7.4.20 and a live `kilo serve` session:
+project-local `.kilo/plugins/*.ts` is auto-discovered and the plugin is
+instantiated on session creation. What is not yet confirmed is narrower than
+"does this work at all" — whether `experimental.session.compacting` actually
+fires when Kilo's own token-limit compaction triggers mid-session, since only
+load-at-session-start has been exercised live. Treat Kilo as
 "Other/unknown"-tier (manual/fresh-session mode) for anything you cannot
-afford to lose continuity on, until the plugin path is confirmed empirically.
+afford to lose continuity on, until a real compaction event confirms the hook
+fires.
 
 ## Project-local installation
 

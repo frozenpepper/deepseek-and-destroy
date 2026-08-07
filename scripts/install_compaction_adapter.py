@@ -230,15 +230,19 @@ def install_opencode(project_root: Path) -> dict[str, Any]:
 
 
 def kilo_plugin_source() -> str:
-    # EXPERIMENTAL: Kilo's bundled CLI runtime references the same
-    # "session.compacting" hook name OpenCode's plugin interface uses, which is
-    # why this is worth shipping at all -- but no live Kilo run has confirmed
-    # the hook actually fires, what shape `output` has, or where Kilo expects a
-    # local (non-npm-published) plugin file to live. Verify against a real Kilo
-    # session before relying on this for a run you can't afford to lose.
-    return r'''// EXPERIMENTAL -- unverified against a live Kilo session. See KILOCODE.md
-// and HARNESS.md's capability matrix before relying on this.
-import type { Plugin } from "@opencode-ai/plugin"
+    # EXPERIMENTAL: package name, named-export shape, hook input/output shape,
+    # ctx fields, and .kilo/plugins/*.ts auto-discovery are all confirmed
+    # against @kilocode/plugin 7.4.20 and a live Kilo server (session create ->
+    # plugin instantiation). What is NOT yet confirmed is this hook actually
+    # firing when Kilo's own token-limit compaction triggers mid-session --
+    # only load-at-session-start was tested. Verify that specifically before
+    # relying on this for a run you can't afford to lose continuity on.
+    return r'''// EXPERIMENTAL -- package, export shape, hook signature, and ctx fields are
+// confirmed against @kilocode/plugin 7.4.20 and a live Kilo server. NOT yet
+// confirmed: this hook firing during a real mid-session compaction event
+// (only load-at-session-start was tested). See KILOCODE.md and HARNESS.md's
+// capability matrix before relying on this for a run you can't afford to lose.
+import type { Plugin } from "@kilocode/plugin"
 
 export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => {
   return {
@@ -287,10 +291,13 @@ def install_kilo(project_root: Path) -> dict[str, Any]:
         "changed": changed,
         "backup": str(backup_path) if backup_path else None,
         "manual_step": (
-            "EXPERIMENTAL AND UNVERIFIED: this plugin has not been confirmed to "
-            "load or fire against a real Kilo session. Run a Kilo session, force "
-            "or wait for compaction, and check DeepSeekAndDestroy/ for a new "
-            "checkpoint before trusting this path. Until confirmed, treat Kilo as "
+            "EXPERIMENTAL: package, export shape, hook signature, and plugin "
+            "auto-discovery are confirmed against a live Kilo session (the "
+            "plugin loads on session creation). NOT yet confirmed: this hook "
+            "firing during a real mid-session compaction event. Run a Kilo "
+            "session, force or wait for compaction, and check "
+            "DeepSeekAndDestroy/ for a new checkpoint before trusting this "
+            "path. Until that specific step is confirmed, treat Kilo as "
             "manual/fresh-session mode per HARNESS.md and COMPACTION.md."
         ),
     }
