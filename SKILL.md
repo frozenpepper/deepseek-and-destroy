@@ -2,7 +2,7 @@
 name: deepseek-and-destroy
 description: "Continuously execute a complex multi-phase implementation plan through configurable worker-agent loops until the plan is complete or a genuinely human-level blocker is reached. Uses fresh implementation and review contexts, reviewer-led repair, fresh re-review, durable multi-orchestrator state, and main-orchestrator phase gates. Defaults to OpenCode with DeepSeek V4 Flash."
 license: MIT
-compatibility: codex, claude-code, opencode, and comparable coding harnesses
+compatibility: codex, claude-code, opencode, kilo-code, and comparable coding harnesses
 metadata:
   default-harness: opencode
   default-model: opencode-go/deepseek-v4-flash
@@ -289,6 +289,9 @@ The skill folder contains required operational detail:
 - **`CLAUDE.md`** — Claude Code orchestrator compaction hooks and activation;
 - **`OPENCODE.md`** — default OpenCode worker profile, isolated ephemeral database
   behavior, and OpenCode orchestrator compaction plugin;
+- **`KILOCODE.md`** — Kilo Code native-subagent worker profile and (experimental,
+  unverified) Kilo orchestrator compaction plugin; read only when the effective
+  orchestrator or worker harness is Kilo Code;
 - **`CONFIG.example.md`** — optional configuration examples;
 - **`README.md`** — installation and usage guide;
 - **`scripts/check_state.py`** — optional run-state/turn-exit consistency helper;
@@ -300,16 +303,18 @@ The skill folder contains required operational detail:
 - **`scripts/detect_harness.py`** — conservatively identifies the main
   orchestrator harness and its checkpoint capabilities;
 - **`scripts/install_compaction_adapter.py`** — installs the best project-local
-  Codex, Claude Code, or OpenCode checkpoint adapter;
+  Codex, Claude Code, OpenCode, or Kilo Code checkpoint adapter;
 - **`scripts/context_checkpoint.py`** — creates immutable context checkpoints and
-  verifies post-compaction continuity.
+  verifies post-compaction continuity;
+- **`scripts/install_kilo_agents.py`** — resolves the effective worker model
+  against `kilo models` and installs the role-separated Kilo subagents.
 
 Read `WORKSPACE.md` during intake. Read `PROMPTS.md` before the first worker
 spawn and whenever auditing a stored prompt. During intake, read `HARNESS.md`,
 resolve the **orchestrator** harness independently from worker routing, and install
 or verify its adapter. Read the selected harness adapter and `COMPACTION.md`.
 Read `OPENCODE.md` whenever either the orchestrator or effective worker profile
-uses OpenCode.
+uses OpenCode; read `KILOCODE.md` whenever either uses Kilo Code.
 
 If a companion file required by the effective configuration is unavailable,
 do not improvise a weaker protocol. Recover it or mark the run `HUMAN-BLOCKED`

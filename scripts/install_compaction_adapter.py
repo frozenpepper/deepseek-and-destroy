@@ -72,10 +72,11 @@ def detect_harness(explicit: str | None) -> str:
         "codex": int(bool(env.get("CODEX_HOME") or env.get("CODEX_THREAD_ID"))) * 5 + int("codex" in commands) * 8,
         "claude-code": int(bool(env.get("CLAUDE_PROJECT_DIR") or env.get("CLAUDE_ENV_FILE"))) * 5 + int("claude" in commands) * 8,
         "opencode": int(bool(env.get("OPENCODE_DB") or env.get("OPENCODE_CONFIG"))) * 5 + int("opencode" in commands) * 8,
+        "kilo": int(bool(env.get("KILO_BIN_PATH") or env.get("KILO_BWRAP_CACHE"))) * 5 + int("kilo" in commands) * 8,
     }
     ranked = sorted(signals.items(), key=lambda item: item[1], reverse=True)
     if ranked[0][1] <= 0 or (len(ranked) > 1 and ranked[0][1] == ranked[1][1]):
-        raise RuntimeError("Harness detection is ambiguous; pass --harness codex|claude-code|opencode")
+        raise RuntimeError("Harness detection is ambiguous; pass --harness codex|claude-code|opencode|kilo")
     return ranked[0][0]
 
 
@@ -228,9 +229,83 @@ def install_opencode(project_root: Path) -> dict[str, Any]:
     }
 
 
+def kilo_plugin_source() -> str:
+    # EXPERIMENTAL: package name, named-export shape, hook input/output shape,
+    # ctx fields, and .kilo/plugins/*.ts auto-discovery are all confirmed
+    # against @kilocode/plugin 7.4.20 and a live Kilo server (session create ->
+    # plugin instantiation). What is NOT yet confirmed is this hook actually
+    # firing when Kilo's own token-limit compaction triggers mid-session --
+    # only load-at-session-start was tested. Verify that specifically before
+    # relying on this for a run you can't afford to lose continuity on.
+    return r'''// EXPERIMENTAL -- package, export shape, hook signature, and ctx fields are
+// confirmed against @kilocode/plugin 7.4.20 and a live Kilo server. NOT yet
+// confirmed: this hook firing during a real mid-session compaction event
+// (only load-at-session-start was tested). See KILOCODE.md and HARNESS.md's
+// capability matrix before relying on this for a run you can't afford to lose.
+import type { Plugin } from "@kilocode/plugin"
+
+export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => {
+  return {
+    "experimental.session.compacting": async (_input, output) => {
+      const root = process.env.DSD_PROJECT_ROOT || ctx.worktree || ctx.directory
+      const script = `${root}/DeepSeekAndDestroy/tools/context_checkpoint.py`
+      const prepare = Bun.spawnSync([
+        "python3", script,
+        "--project-root", root,
+        "prepare",
+        "--harness", "kilo",
+        "--reason", "kilo-native-precompact",
+      ], { stdout: "pipe", stderr: "pipe" })
+
+      if (prepare.exitCode === 4) return
+      if (prepare.exitCode !== 0) {
+        const stderr = new TextDecoder().decode(prepare.stderr).trim()
+        output.context.push(`\n## DeepSeek and Destroy checkpoint warning\nCheckpoint preparation failed: ${stderr}\nDo not assume continuity is safe. Persist the active run manually before continuing.\n`)
+        return
+      }
+
+      const rehydrate = Bun.spawnSync([
+        "python3", script,
+        "--project-root", root,
+        "instruction",
+      ], { stdout: "pipe", stderr: "pipe" })
+      const text = new TextDecoder().decode(rehydrate.stdout).trim()
+      output.context.push(`\n## DeepSeek and Destroy durable continuation\n${text}\n`)
+    },
+  }
+}
+'''
+
+
+def install_kilo(project_root: Path) -> dict[str, Any]:
+    path = project_root / ".kilo" / "plugins" / "dsd-compaction.ts"
+    source = kilo_plugin_source()
+    changed = not path.exists() or path.read_text(encoding="utf-8") != source
+    backup_path = backup(path) if changed and path.exists() else None
+    if changed:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    return {
+        "harness": "kilo",
+        "plugin": str(path),
+        "changed": changed,
+        "backup": str(backup_path) if backup_path else None,
+        "manual_step": (
+            "EXPERIMENTAL: package, export shape, hook signature, and plugin "
+            "auto-discovery are confirmed against a live Kilo session (the "
+            "plugin loads on session creation). NOT yet confirmed: this hook "
+            "firing during a real mid-session compaction event. Run a Kilo "
+            "session, force or wait for compaction, and check "
+            "DeepSeekAndDestroy/ for a new checkpoint before trusting this "
+            "path. Until that specific step is confirmed, treat Kilo as "
+            "manual/fresh-session mode per HARNESS.md and COMPACTION.md."
+        ),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--harness", default="auto", choices=["auto", "codex", "claude-code", "opencode"])
+    parser.add_argument("--harness", default="auto", choices=["auto", "codex", "claude-code", "opencode", "kilo"])
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--skill-root", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args()
@@ -244,6 +319,8 @@ def main() -> int:
             result = install_codex(project_root)
         elif harness == "claude-code":
             result = install_claude(project_root)
+        elif harness == "kilo":
+            result = install_kilo(project_root)
         else:
             result = install_opencode(project_root)
         result.update({"project_root": str(project_root), "helper": str(helper), "installed_at": utc_stamp()})

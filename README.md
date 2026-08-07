@@ -315,6 +315,10 @@ database into a small moon.
 
 See `OPENCODE.md`.
 
+A Kilo Code profile is also available: workers run as a native Kilo subagent
+instead of a spawned process, so there is no database or PID to manage at
+all. See `KILOCODE.md` and the Kilo example profile in `CONFIG.example.md`.
+
 ---
 
 ## Install
@@ -332,17 +336,23 @@ deepseek-and-destroy/
 ├── CODEX.md
 ├── CLAUDE.md
 ├── OPENCODE.md
+├── KILOCODE.md
 ├── CONFIG.example.md
 ├── CHANGELOG.md
 ├── adapters/
 │   ├── codex/
 │   ├── claude/
-│   └── opencode/
+│   ├── opencode/
+│   └── kilo/
+│       └── agents/
+│           ├── dsd-mutating-worker.md
+│           └── dsd-readonly-worker.md
 └── scripts/
     ├── check_state.py
     ├── context_checkpoint.py
     ├── detect_harness.py
     ├── install_compaction_adapter.py
+    ├── install_kilo_agents.py
     ├── decision_packet.py
     ├── opencode_probe.py
     └── scope_snapshot.py
@@ -356,10 +366,16 @@ The companion files keep the core readable:
 - `PROMPTS.md` — exact implementer/reviewer/fixer prompts;
 - `HARNESS.md` and `COMPACTION.md` — orchestrator harness selection and durable context checkpoints;
 - `CODEX.md`, `CLAUDE.md`, and `OPENCODE.md` — harness-specific adapters;
+- `KILOCODE.md` — Kilo Code worker adapter (native subagent delegation) and
+  experimental orchestrator compaction plugin;
+- `adapters/kilo/agents/` — role-separated Kilo subagent templates (implementer
+  and read-only), installed by `scripts/install_kilo_agents.py`;
 - `CONFIG.example.md` — optional model, routing, project, and checkpoint rules;
 - `scripts/check_state.py` — optional Stop-hook/state invariant checker;
 - `scripts/context_checkpoint.py` — immutable checkpoint and rehydration helper;
 - `scripts/detect_harness.py` and `install_compaction_adapter.py` — adapter selection and project-local installation;
+- `scripts/install_kilo_agents.py` — resolves the effective worker model and
+  installs the Kilo subagents;
 - `scripts/opencode_probe.py` — isolated exact-model health probe;
 - `scripts/scope_snapshot.py` — mechanical content-hash baseline and comparison.
 

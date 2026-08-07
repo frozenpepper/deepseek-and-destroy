@@ -6,7 +6,7 @@ It is independent from the harness used to launch worker agents.
 ## Assessment sequence
 
 1. Use an explicit user/config value when present:
-   `orchestrator_harness: codex | claude-code | opencode | custom`.
+   `orchestrator_harness: codex | claude-code | opencode | kilo | custom`.
 2. Otherwise inspect the current session/system context.
 3. Run the conservative detector:
 
@@ -27,7 +27,23 @@ It is independent from the harness used to launch worker agents.
 | Codex | yes | yes | `SessionStart` source `compact` | `CODEX.md` |
 | Claude Code | yes | yes | `SessionStart` matcher `compact` | `CLAUDE.md` |
 | OpenCode V2 | plugin pre-compaction hook | no documented post hook | skill/state invariant plus injected compaction context | `OPENCODE.md` |
+| Kilo Code | hook wired & confirmed loadable; live-fire unconfirmed | `autocontinue` hook declared, unused by adapter; live-fire unconfirmed | manual/fresh-session handoff confirmed; plugin path experimental | `KILOCODE.md` |
 | Other/unknown | unknown | unknown | manual/fresh-session handoff | `COMPACTION.md` |
+
+Kilo ships its own `@kilocode/plugin` package (distinct from OpenCode's),
+which declares `experimental.session.compacting` with the same input/output
+shape OpenCode's plugin interface uses, plus a separate
+`experimental.compaction.autocontinue` fired after compaction succeeds. The
+adapter's package, export shape, hook signature, and `ctx` fields are
+confirmed against `@kilocode/plugin` 7.4.20 and a live `kilo serve` session:
+project-local `.kilo/plugins/*.ts` is auto-discovered and the plugin is
+instantiated on session creation. What is not yet confirmed is narrower than
+"does this work at all" — whether `experimental.session.compacting` actually
+fires when Kilo's own token-limit compaction triggers mid-session, since only
+load-at-session-start has been exercised live. Treat Kilo as
+"Other/unknown"-tier (manual/fresh-session mode) for anything you cannot
+afford to lose continuity on, until a real compaction event confirms the hook
+fires.
 
 ## Project-local installation
 
@@ -47,7 +63,8 @@ The installer:
 - detects or uses the explicit orchestrator harness;
 - copies `context_checkpoint.py` to
   `DeepSeekAndDestroy/tools/context_checkpoint.py`;
-- installs/merges the project-local Codex or Claude hooks, or the OpenCode plugin;
+- installs/merges the project-local Codex or Claude hooks, or the OpenCode/Kilo
+  plugin (the Kilo plugin is experimental — see the capability matrix above);
 - backs up modified JSON configuration files;
 - writes `DeepSeekAndDestroy/compaction-adapter-installation.md`.
 

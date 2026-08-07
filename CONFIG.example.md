@@ -21,6 +21,43 @@ variables.
 - Safe stop: terminate only the uniquely identified run
 - Suitable roles: phase surveyor, discovery, implementer, verification, reviewer, fixer, re-reviewer, recovery auditor, phase auditor, phase worker
 
+### Profile: DeepSeek Worker, mutating (Kilo Code)
+
+- Harness: Kilo Code native subagent (see `KILOCODE.md`)
+- Endpoint: DeepSeek provider configured via `kilo auth`
+- Model: resolved and verified against `kilo models` by
+  `scripts/install_kilo_agents.py` (default `deepseek/deepseek-v4-flash`,
+  direct provider — not the `kilo/deepseek/...` gateway/credits namespace)
+- Agent: `dsd-mutating-worker`, installed to `.kilo/agents/dsd-mutating-worker.md`
+  by the installer above — do not hand-author or hand-edit this file
+- Reasoning level: default
+- Fresh launch: native `task` tool call with `agent="dsd-mutating-worker"`; no
+  process/PID/ephemeral-DB management needed
+- Resume: fresh delegation referencing the prior report by path (see
+  `KILOCODE.md` for the unresolved native-resume question)
+- Positive liveness: the `task` call returning is completion; no separate liveness probe
+- Health probe: trivial delegated `HEALTHCHECK OK` task before spending a real attempt after suspected provider trouble
+- Safe stop: not applicable — no detached process exists to stop
+- Suitable roles: implementer, fixer (mutating roles only)
+
+### Profile: DeepSeek Worker, read-only (Kilo Code)
+
+- Same harness/endpoint/model/launch/resume/liveness/probe as the mutating
+  profile above.
+- Agent: `dsd-readonly-worker`, installed to `.kilo/agents/dsd-readonly-worker.md`.
+  `edit` is denied at the permission level — an independent reviewer that can
+  silently patch its own findings is not independent.
+- Suitable roles: phase surveyor, discovery, verification, reviewer,
+  re-reviewer, recovery auditor, phase auditor, phase worker — every role
+  that must not mutate project files.
+
+To make these the effective profile instead of the OpenCode default: run
+`python3 <skill-root>/scripts/install_kilo_agents.py --project-root <project-root>`
+once, set Harness to Kilo Code in Role routing below (routing mutating roles
+to the mutating profile and every other role to the read-only profile), and
+have the orchestrator itself run as a Kilo Code primary agent with `task` and
+`skill` permissions (the built-in `orchestrator` agent already qualifies).
+
 ### Profile: Backup Worker
 
 - Harness: <Codex, Claude Code, OpenCode, or custom>
