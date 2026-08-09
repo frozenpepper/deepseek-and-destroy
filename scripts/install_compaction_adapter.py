@@ -25,11 +25,7 @@ def utc_stamp() -> str:
 
 def git_root(start: Path) -> Path:
     try:
-        out = subprocess.check_output(
-            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
+        out = subprocess.check_output(["git", "-C", str(start), "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL).strip()
         if out:
             return Path(out).resolve()
     except Exception:
@@ -42,11 +38,7 @@ def parent_commands(limit: int = 8) -> str:
     pid = os.getpid()
     for _ in range(limit):
         try:
-            out = subprocess.check_output(
-                ["ps", "-o", "ppid=,command=", "-p", str(pid)],
-                text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
+            out = subprocess.check_output(["ps", "-o", "ppid=,command=", "-p", str(pid)], text=True, stderr=subprocess.DEVNULL).strip()
         except Exception:
             break
         parts = out.split(None, 1)
@@ -100,12 +92,7 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def hook_group(matcher: str | None, command: str, status: str, context_limit: int | None = None) -> dict[str, Any]:
-    handler: dict[str, Any] = {
-        "type": "command",
-        "command": command,
-        "statusMessage": status,
-        "timeout": 30,
-    }
+    handler: dict[str, Any] = {"type": "command", "command": command, "statusMessage": status, "timeout": 30}
     if context_limit is not None:
         handler["additionalContextLimit"] = context_limit
     group: dict[str, Any] = {"hooks": [handler]}
@@ -117,15 +104,12 @@ def hook_group(matcher: str | None, command: str, status: str, context_limit: in
 def ensure_hook(data: dict[str, Any], event: str, group: dict[str, Any]) -> bool:
     hooks = data.setdefault("hooks", {})
     groups = hooks.setdefault(event, [])
-    command = group["hooks"][0]["command"]
     for existing in groups:
         for handler in existing.get("hooks", []):
             if MARKER in str(handler.get("command", "")) and event.lower() in str(handler.get("command", "")).lower():
                 if existing == group:
                     return False
-                existing.clear()
-                existing.update(group)
-                return True
+                existing.clear(); existing.update(group); return True
     groups.append(group)
     return True
 
@@ -151,15 +135,8 @@ def install_codex(project_root: Path) -> dict[str, Any]:
     changed |= ensure_hook(data, "PostCompact", hook_group("^(manual|auto)$", f"{script} hook --harness codex --event postcompact", "Recording DSD compaction"))
     changed |= ensure_hook(data, "SessionStart", hook_group("^(compact|resume)$", f"{script} hook --harness codex --event sessionstart", "Reloading DSD run state", 2200))
     backup_path = backup(path) if changed and path.exists() else None
-    if changed:
-        write_json(path, data)
-    return {
-        "harness": "codex",
-        "config": str(path),
-        "changed": changed,
-        "backup": str(backup_path) if backup_path else None,
-        "manual_step": "Open /hooks in Codex and trust the project-local hooks before relying on them.",
-    }
+    if changed: write_json(path, data)
+    return {"harness": "codex", "config": str(path), "changed": changed, "backup": str(backup_path) if backup_path else None, "manual_step": "Open /hooks in Codex and trust the project-local hooks before relying on them."}
 
 
 def install_claude(project_root: Path) -> dict[str, Any]:
@@ -171,136 +148,72 @@ def install_claude(project_root: Path) -> dict[str, Any]:
     changed |= ensure_hook(data, "PostCompact", hook_group("^(manual|auto)$", f"{script} hook --harness claude-code --event postcompact", "Recording DSD compaction"))
     changed |= ensure_hook(data, "SessionStart", hook_group("^(compact|resume)$", f"{script} hook --harness claude-code --event sessionstart", "Reloading DSD run state"))
     backup_path = backup(path) if changed and path.exists() else None
-    if changed:
-        write_json(path, data)
+    if changed: write_json(path, data)
     return {"harness": "claude-code", "config": str(path), "changed": changed, "backup": str(backup_path) if backup_path else None}
 
 
 def opencode_plugin_source() -> str:
     return r'''import type { Plugin } from "@opencode-ai/plugin"
 
-export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => {
-  return {
-    "experimental.session.compacting": async (_input, output) => {
-      const root = process.env.DSD_PROJECT_ROOT || ctx.worktree || ctx.directory
-      const script = `${root}/DeepSeekAndDestroy/tools/context_checkpoint.py`
-      const prepare = Bun.spawnSync([
-        "python3", script,
-        "--project-root", root,
-        "prepare",
-        "--harness", "opencode",
-        "--reason", "opencode-native-precompact",
-      ], { stdout: "pipe", stderr: "pipe" })
-
-      if (prepare.exitCode === 4) return
-      if (prepare.exitCode !== 0) {
-        const stderr = new TextDecoder().decode(prepare.stderr).trim()
-        output.context.push(`\n## DeepSeek and Destroy checkpoint warning\nCheckpoint preparation failed: ${stderr}\nDo not assume continuity is safe. Persist the active run manually before continuing.\n`)
-        return
-      }
-
-      const rehydrate = Bun.spawnSync([
-        "python3", script,
-        "--project-root", root,
-        "instruction",
-      ], { stdout: "pipe", stderr: "pipe" })
-      const text = new TextDecoder().decode(rehydrate.stdout).trim()
-      output.context.push(`\n## DeepSeek and Destroy durable continuation\n${text}\n`)
-    },
-  }
-}
+export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => ({
+  "experimental.session.compacting": async (_input, output) => {
+    const root = process.env.DSD_PROJECT_ROOT || ctx.worktree || ctx.directory
+    const script = `${root}/DeepSeekAndDestroy/tools/context_checkpoint.py`
+    const prepare = Bun.spawnSync(["python3", script, "--project-root", root, "prepare", "--harness", "opencode", "--reason", "opencode-native-precompact"], { stdout: "pipe", stderr: "pipe" })
+    if (prepare.exitCode === 4) return
+    if (prepare.exitCode !== 0) {
+      const stderr = new TextDecoder().decode(prepare.stderr).trim()
+      output.context.push(`\n## DeepSeek and Destroy checkpoint warning\nCheckpoint preparation failed: ${stderr}\n`)
+      return
+    }
+    const instruction = Bun.spawnSync(["python3", script, "--project-root", root, "instruction"], { stdout: "pipe", stderr: "pipe" })
+    output.context.push(`\n## DeepSeek and Destroy durable continuation\n${new TextDecoder().decode(instruction.stdout).trim()}\n`)
+  },
+})
 '''
 
 
-def install_opencode(project_root: Path) -> dict[str, Any]:
-    path = project_root / ".opencode" / "plugins" / "dsd-compaction.ts"
-    source = opencode_plugin_source()
+def install_plugin(project_root: Path, harness: str, directory: str, source: str) -> dict[str, Any]:
+    path = project_root / directory / "plugins" / "dsd-compaction.ts"
     changed = not path.exists() or path.read_text(encoding="utf-8") != source
     backup_path = backup(path) if changed and path.exists() else None
     if changed:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
-    return {
-        "harness": "opencode",
-        "plugin": str(path),
-        "changed": changed,
-        "backup": str(backup_path) if backup_path else None,
-        "manual_step": "Restart/reload OpenCode so the project-local plugin is active. OpenCode has no documented post-compaction hook; the skill/state rehydration invariant completes the protocol.",
-    }
+    return {"harness": harness, "plugin": str(path), "changed": changed, "backup": str(backup_path) if backup_path else None}
+
+
+def install_opencode(project_root: Path) -> dict[str, Any]:
+    result = install_plugin(project_root, "opencode", ".opencode", opencode_plugin_source())
+    result["manual_step"] = "Restart/reload OpenCode so the project-local plugin is active; DSD verify-resume completes post-compaction continuity."
+    return result
 
 
 def kilo_plugin_source() -> str:
-    # EXPERIMENTAL: package name, named-export shape, hook input/output shape,
-    # ctx fields, and .kilo/plugins/*.ts auto-discovery are all confirmed
-    # against @kilocode/plugin 7.4.20 and a live Kilo server (session create ->
-    # plugin instantiation). What is NOT yet confirmed is this hook actually
-    # firing when Kilo's own token-limit compaction triggers mid-session --
-    # only load-at-session-start was tested. Verify that specifically before
-    # relying on this for a run you can't afford to lose continuity on.
-    return r'''// EXPERIMENTAL -- package, export shape, hook signature, and ctx fields are
-// confirmed against @kilocode/plugin 7.4.20 and a live Kilo server. NOT yet
-// confirmed: this hook firing during a real mid-session compaction event
-// (only load-at-session-start was tested). See KILOCODE.md and HARNESS.md's
-// capability matrix before relying on this for a run you can't afford to lose.
-import type { Plugin } from "@kilocode/plugin"
+    return r'''import type { Plugin } from "@kilocode/plugin"
 
-export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => {
-  return {
-    "experimental.session.compacting": async (_input, output) => {
-      const root = process.env.DSD_PROJECT_ROOT || ctx.worktree || ctx.directory
-      const script = `${root}/DeepSeekAndDestroy/tools/context_checkpoint.py`
-      const prepare = Bun.spawnSync([
-        "python3", script,
-        "--project-root", root,
-        "prepare",
-        "--harness", "kilo",
-        "--reason", "kilo-native-precompact",
-      ], { stdout: "pipe", stderr: "pipe" })
-
-      if (prepare.exitCode === 4) return
-      if (prepare.exitCode !== 0) {
-        const stderr = new TextDecoder().decode(prepare.stderr).trim()
-        output.context.push(`\n## DeepSeek and Destroy checkpoint warning\nCheckpoint preparation failed: ${stderr}\nDo not assume continuity is safe. Persist the active run manually before continuing.\n`)
-        return
-      }
-
-      const rehydrate = Bun.spawnSync([
-        "python3", script,
-        "--project-root", root,
-        "instruction",
-      ], { stdout: "pipe", stderr: "pipe" })
-      const text = new TextDecoder().decode(rehydrate.stdout).trim()
-      output.context.push(`\n## DeepSeek and Destroy durable continuation\n${text}\n`)
-    },
-  }
-}
+export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => ({
+  "experimental.session.compacting": async (_input, output) => {
+    const root = process.env.DSD_PROJECT_ROOT || ctx.worktree || ctx.directory
+    const script = `${root}/DeepSeekAndDestroy/tools/context_checkpoint.py`
+    const prepare = Bun.spawnSync(["python3", script, "--project-root", root, "prepare", "--harness", "kilo", "--reason", "kilo-native-precompact"], { stdout: "pipe", stderr: "pipe" })
+    if (prepare.exitCode === 4) return
+    if (prepare.exitCode !== 0) {
+      const stderr = new TextDecoder().decode(prepare.stderr).trim()
+      output.context.push(`\n## DeepSeek and Destroy checkpoint warning\nCheckpoint preparation failed: ${stderr}\n`)
+      return
+    }
+    const instruction = Bun.spawnSync(["python3", script, "--project-root", root, "instruction"], { stdout: "pipe", stderr: "pipe" })
+    output.context.push(`\n## DeepSeek and Destroy durable continuation\n${new TextDecoder().decode(instruction.stdout).trim()}\n`)
+  },
+})
 '''
 
 
 def install_kilo(project_root: Path) -> dict[str, Any]:
-    path = project_root / ".kilo" / "plugins" / "dsd-compaction.ts"
-    source = kilo_plugin_source()
-    changed = not path.exists() or path.read_text(encoding="utf-8") != source
-    backup_path = backup(path) if changed and path.exists() else None
-    if changed:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding="utf-8")
-    return {
-        "harness": "kilo",
-        "plugin": str(path),
-        "changed": changed,
-        "backup": str(backup_path) if backup_path else None,
-        "manual_step": (
-            "EXPERIMENTAL: package, export shape, hook signature, and plugin "
-            "auto-discovery are confirmed against a live Kilo session (the "
-            "plugin loads on session creation). NOT yet confirmed: this hook "
-            "firing during a real mid-session compaction event. Run a Kilo "
-            "session, force or wait for compaction, and check "
-            "DeepSeekAndDestroy/ for a new checkpoint before trusting this "
-            "path. Until that specific step is confirmed, treat Kilo as "
-            "manual/fresh-session mode per HARNESS.md and COMPACTION.md."
-        ),
-    }
+    result = install_plugin(project_root, "kilo", ".kilo", kilo_plugin_source())
+    result["manual_step"] = "Before trusting automatic Kilo compaction for an irreplaceable run, observe a real compaction creating a DSD checkpoint; otherwise use KILOCODE.md manual/fresh-session continuity."
+    return result
 
 
 def main() -> int:
@@ -315,22 +228,13 @@ def main() -> int:
     try:
         harness = detect_harness(args.harness)
         helper = install_helper(skill_root, project_root)
-        if harness == "codex":
-            result = install_codex(project_root)
-        elif harness == "claude-code":
-            result = install_claude(project_root)
-        elif harness == "kilo":
-            result = install_kilo(project_root)
-        else:
-            result = install_opencode(project_root)
+        if harness == "codex": result = install_codex(project_root)
+        elif harness == "claude-code": result = install_claude(project_root)
+        elif harness == "kilo": result = install_kilo(project_root)
+        else: result = install_opencode(project_root)
         result.update({"project_root": str(project_root), "helper": str(helper), "installed_at": utc_stamp()})
         report = project_root / "DeepSeekAndDestroy" / "compaction-adapter-installation.md"
-        report.write_text(
-            "# DeepSeek and Destroy Compaction Adapter\n\n```json\n"
-            + json.dumps(result, indent=2)
-            + "\n```\n",
-            encoding="utf-8",
-        )
+        report.write_text("# DeepSeek and Destroy Compaction Adapter\n\n```json\n" + json.dumps(result, indent=2) + "\n```\n", encoding="utf-8")
         print(json.dumps(result, indent=2))
         return 0
     except Exception as exc:
