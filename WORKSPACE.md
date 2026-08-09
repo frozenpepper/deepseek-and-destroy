@@ -156,6 +156,7 @@ State describes reality, never intention. A representative structure:
     "sequence": 2,
     "status": "resumed",
     "checkpoint_path": "<run-root>/compactions/0002/CHECKPOINT.md",
+    "manifest_path": "<run-root>/compactions/0002/resume-manifest.json",
     "continuity_verified": true,
     "preserved_next_action": "launch phase-1-task-2 reviewer round 1"
   },
