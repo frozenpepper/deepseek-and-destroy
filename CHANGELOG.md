@@ -1,6 +1,34 @@
 # Changelog
 ## Unreleased
 
+### Worker proof-contract revision
+
+Based on a long field run where independent reviews still accepted materially
+wrong-reason evidence:
+
+- added `worker/SKILL.md`, `worker/BUILD.md`, `worker/REVIEW.md`, and
+  `worker/PROOF-PATTERNS.md` as a compact worker discipline layer rather than
+  growing one giant orchestrator prompt;
+- established the causal-proof rule: an expected outcome is not proof unless the
+  named production mechanism was actually reached and caused it;
+- added stable `AC-*` acceptance ids, shared builder/reviewer Proof Obligations,
+  and reviewer Proof Matrices;
+- added counterexample-first review for high-risk criteria;
+- added optional proof recipes for negative/fail-closed gates, cardinality,
+  canonical identity, durability, and derived status/evidence;
+- made task-relevant correctness defects incompatible with PASS/fast-path even when
+  described as known limitations or future cleanup;
+- required concrete closure tasks for intentional maintained-suite consequences,
+  while keeping the phase blocked until closure;
+- added `needs-revalidation` → `still-valid|superseded` handling for dependent work
+  after reopened prerequisites;
+- added `scripts/check_review_contract.py` to mechanically verify AC coverage,
+  Proof Matrix structure, verdict, defect declaration, and fast-path consistency
+  without pretending to judge software semantics;
+- hardened OpenCode PID persistence/recovery and duplicate-launch prevention;
+- refreshed `SKILL.md`, `PROMPTS.md`, `WORKSPACE.md`, and README around the proof
+  contract while preserving worker authority and orchestrator quota economy.
+
 - Added the canonical root `LICENSE` file for the MIT License already declared in `SKILL.md`.
 - Added an explicit README license section covering permitted reuse, modification, redistribution, and commercial use.
 
