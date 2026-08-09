@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 import subprocess
-from pathlib import Path
 from typing import Iterable
 
 KNOWN = {"codex", "claude-code", "opencode", "kilo", "unknown"}
@@ -59,9 +58,6 @@ def score_candidates(commands: Iterable[str]) -> dict[str, int]:
         scores["claude-code"] += 5
     if env.get("OPENCODE_DB") or env.get("OPENCODE_CONFIG") or env.get("OPENCODE_CLIENT"):
         scores["opencode"] += 5
-    # KILO_BIN_PATH/KILO_BWRAP_CACHE exist in the installed CLI's own code but are
-    # not confirmed to be exported into every child-process environment; treat as
-    # a weak secondary signal only, same weight as the other harnesses' env checks.
     if env.get("KILO_BIN_PATH") or env.get("KILO_BWRAP_CACHE"):
         scores["kilo"] += 5
 
@@ -85,69 +81,31 @@ def capabilities(harness: str) -> dict[str, object]:
         "safe_boundary_fallback": True,
     }
     if harness == "codex":
-        base.update(
-            {
-                "precompact_hook": True,
-                "postcompact_hook": True,
-                "postcompact_context_injection": True,
-                "manual_compaction": True,
-                "configurable_auto_compact_token_limit": True,
-                "adapter": "CODEX.md",
-            }
-        )
+        base.update({"precompact_hook": True, "postcompact_hook": True,
+                     "postcompact_context_injection": True, "manual_compaction": True,
+                     "configurable_auto_compact_token_limit": True, "adapter": "CODEX.md"})
     elif harness == "claude-code":
-        base.update(
-            {
-                "precompact_hook": True,
-                "postcompact_hook": True,
-                "postcompact_context_injection": True,
-                "manual_compaction": True,
-                "configurable_auto_compact_token_limit": False,
-                "adapter": "CLAUDE.md",
-            }
-        )
+        base.update({"precompact_hook": True, "postcompact_hook": True,
+                     "postcompact_context_injection": True, "manual_compaction": True,
+                     "configurable_auto_compact_token_limit": False, "adapter": "CLAUDE.md"})
     elif harness == "opencode":
-        base.update(
-            {
-                "precompact_hook": True,
-                "postcompact_hook": False,
-                "postcompact_context_injection": "skill-state invariant",
-                "manual_compaction": True,
-                "configurable_auto_compact_token_limit": "buffer/keep, not percentage",
-                "adapter": "OPENCODE.md",
-            }
-        )
+        base.update({"precompact_hook": True, "postcompact_hook": False,
+                     "postcompact_context_injection": "skill-state invariant",
+                     "manual_compaction": True,
+                     "configurable_auto_compact_token_limit": "buffer/keep, not percentage",
+                     "adapter": "OPENCODE.md"})
     elif harness == "kilo":
-        base.update(
-            {
-                # Kilo's own @kilocode/plugin package declares
-                # "experimental.session.compacting" with the same input/output
-                # shape OpenCode's plugin interface uses. Package, export
-                # shape, hook signature, ctx fields, and .kilo/plugins/*.ts
-                # auto-discovery are confirmed against @kilocode/plugin 7.4.20
-                # and a live `kilo serve` session (plugin instantiated on
-                # session creation). NOT confirmed: the hook firing during a
-                # real mid-session compaction event -- do not upgrade these to
-                # True without that specific empirical verification.
-                "precompact_hook": "experimental, wired+loadable; live-fire unconfirmed",
-                "postcompact_hook": "experimental, autocontinue hook declared but unused; live-fire unconfirmed",
-                "postcompact_context_injection": "experimental, live-fire unconfirmed",
-                "manual_compaction": True,
-                "configurable_auto_compact_token_limit": False,
-                "adapter": "KILOCODE.md",
-            }
-        )
+        base.update({"precompact_hook": "project plugin; live-fire acceptance recommended",
+                     "postcompact_hook": "not relied upon",
+                     "postcompact_context_injection": "DSD verify-resume invariant",
+                     "manual_compaction": True,
+                     "configurable_auto_compact_token_limit": "harness/version dependent",
+                     "adapter": "KILOCODE.md"})
     else:
-        base.update(
-            {
-                "precompact_hook": False,
-                "postcompact_hook": False,
-                "postcompact_context_injection": False,
-                "manual_compaction": "unknown",
-                "configurable_auto_compact_token_limit": False,
-                "adapter": "COMPACTION.md generic fallback",
-            }
-        )
+        base.update({"precompact_hook": False, "postcompact_hook": False,
+                     "postcompact_context_injection": False, "manual_compaction": "unknown",
+                     "configurable_auto_compact_token_limit": False,
+                     "adapter": "COMPACTION.md generic fallback"})
     return base
 
 
@@ -160,28 +118,17 @@ def main() -> int:
     commands = parent_commands()
     scores = score_candidates(commands)
     if args.harness:
-        selected = args.harness
-        confidence = "explicit"
+        selected, confidence = args.harness, "explicit"
     else:
         ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
         if ranked[0][1] <= 0 or (len(ranked) > 1 and ranked[0][1] == ranked[1][1]):
-            selected = "unknown"
-            confidence = "ambiguous"
+            selected, confidence = "unknown", "ambiguous"
         else:
-            selected = ranked[0][0]
-            confidence = "detected"
+            selected, confidence = ranked[0][0], "detected"
 
-    result = {
-        "selected": selected,
-        "confidence": confidence,
-        "scores": scores,
-        "parent_commands": commands,
-        "capabilities": capabilities(selected),
-        "instruction": (
-            "Use an explicit harness from the current session/system context when detection is ambiguous. "
-            "Do not choose merely because another CLI is installed."
-        ),
-    }
+    result = {"selected": selected, "confidence": confidence, "scores": scores,
+              "parent_commands": commands, "capabilities": capabilities(selected),
+              "instruction": "Use explicit current-session identity when detection is ambiguous."}
     if args.json:
         print(json.dumps(result, indent=2))
     else:
