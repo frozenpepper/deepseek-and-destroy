@@ -1,8 +1,6 @@
-// EXPERIMENTAL -- package, export shape, hook signature, and ctx fields are
-// confirmed against @kilocode/plugin 7.4.20 and a live Kilo server. NOT yet
-// confirmed: this hook firing during a real mid-session compaction event
-// (only load-at-session-start was tested). See KILOCODE.md and HARNESS.md's
-// capability matrix before relying on this for a run you can't afford to lose.
+// Kilo project-local DSD pre-compaction adapter.
+// Package/export/hook loading has been validated by the Kilo integration work;
+// live-fire compaction continuity should still be acceptance-tested per KILOCODE.md.
 import type { Plugin } from "@kilocode/plugin"
 
 export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => {
@@ -25,12 +23,12 @@ export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => {
         return
       }
 
-      const rehydrate = Bun.spawnSync([
+      const instruction = Bun.spawnSync([
         "python3", script,
         "--project-root", root,
         "instruction",
       ], { stdout: "pipe", stderr: "pipe" })
-      const text = new TextDecoder().decode(rehydrate.stdout).trim()
+      const text = new TextDecoder().decode(instruction.stdout).trim()
       output.context.push(`\n## DeepSeek and Destroy durable continuation\n${text}\n`)
     },
   }
