@@ -1,14 +1,13 @@
 # Harness adapter templates
 
-Project-local templates used by `scripts/install_compaction_adapter.py` and worker
-installers:
+Core DSD defaults to **external OpenCode CLI workers**. Orchestrator-specific
+adapters exist only for context checkpoint/continuity integration; external worker
+launch/wait semantics are documented in `HARNESS.md`, `CLAUDE.md`, `CODEX.md`, and
+`OPENCODE.md`.
 
-- `codex/` — Codex hooks/config fragments;
-- `claude/` — Claude Code settings fragment;
-- `opencode/dsd-compaction.ts` — OpenCode pre-compaction plugin;
-- `kilo/dsd-compaction.ts` — Kilo pre-compaction plugin;
-- `kilo/agents/dsd-mutating-worker.md` and `dsd-readonly-worker.md` — Kilo
-  subagent templates rendered by `scripts/install_kilo_agents.py`.
+- `codex/` — Codex project-local compaction/session hook fragments.
+- `claude/` — Claude Code project-local compaction/session hook fragments.
+- `opencode/` — OpenCode orchestrator pre-compaction plugin.
 
-Do not hand-edit installed Kilo agents to change models; rerun the installer so the
-model ID is validated first.
+Optional contributed integrations live under top-level `contrib/`, outside this
+core adapter tree. They are not loaded or detected unless explicitly selected.
