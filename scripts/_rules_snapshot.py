@@ -1,63 +1,74 @@
 #!/usr/bin/env python3
-"""Verify immutable DSD worker-rules snapshots."""
+"""Shared verification for immutable DSD worker-rules revisions."""
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
+
+PROTOCOL_NAMES = ("BUILD.md", "CORE.md", "EVIDENCE.md", "PROOF-PATTERNS.md", "REVIEW.md", "ROLES.md")
 
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
 
 
-def load_rules_manifest(manifest_path: Path) -> dict[str, Any]:
-    data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError("worker-rules manifest must be a JSON object")
-    return data
-
-
-def verify_rules_manifest(manifest_path: Path) -> list[str]:
-    """Return integrity errors for a rules snapshot manifest; [] means clean."""
-    errors: list[str] = []
-    try:
-        data = load_rules_manifest(manifest_path)
-    except Exception as exc:
-        return [f"cannot load worker-rules manifest {manifest_path}: {exc}"]
-
-    files = data.get("files")
-    if not isinstance(files, list) or not files:
-        return ["worker-rules manifest has no files"]
-
-    root_raw = data.get("snapshot_root")
-    if not isinstance(root_raw, str) or not root_raw:
-        return ["worker-rules manifest missing snapshot_root"]
-    root = Path(root_raw).expanduser().resolve()
-
-    for row in files:
-        if not isinstance(row, dict):
-            errors.append("worker-rules manifest contains non-object file row")
-            continue
-        rel = row.get("path")
-        expected = row.get("sha256")
-        if not isinstance(rel, str) or not rel:
-            errors.append("worker-rules manifest row missing path")
-            continue
-        if not isinstance(expected, str) or len(expected) != 64:
-            errors.append(f"worker-rules manifest row {rel} has invalid sha256")
-            continue
-        path = root / rel
+def protocol_fingerprint(protocol_dir: Path) -> str:
+    h = hashlib.sha256()
+    for name in PROTOCOL_NAMES:
+        path = protocol_dir / name
         if not path.is_file():
-            errors.append(f"worker-rules snapshot file missing: {path}")
-            continue
-        actual = sha256_file(path)
-        if actual != expected:
-            errors.append(f"worker-rules snapshot tampered: {path}")
+            raise ValueError(f"worker protocol snapshot is incomplete: {path}")
+        h.update(name.encode("utf-8")); h.update(b"\0")
+        h.update(path.read_bytes()); h.update(b"\0")
+    return h.hexdigest()
 
-    return errors
+
+def revision_number(rules_path: Path) -> int:
+    m = re.fullmatch(r"r(\d{4})", rules_path.parent.name)
+    if not m or rules_path.name != "WORKER_RULES.md":
+        raise ValueError(f"worker rules must identify worker-rules/rNNNN/WORKER_RULES.md: {rules_path}")
+    return int(m.group(1))
+
+
+def current_payload(rules_path: Path) -> dict[str, Any]:
+    rules_path = rules_path.resolve()
+    revision = revision_number(rules_path)
+    protocol_dir = rules_path.parent / "protocol"
+    return {
+        "format": "dsd-worker-rules-manifest-v1",
+        "revision": revision,
+        "path": str(rules_path),
+        "sha256": sha256_file(rules_path),
+        "protocol_dir": str(protocol_dir.resolve()),
+        "protocol_fingerprint": protocol_fingerprint(protocol_dir),
+        "protocol": {name: sha256_file(protocol_dir / name) for name in PROTOCOL_NAMES},
+    }
+
+
+def verify_snapshot(rules_path: Path) -> dict[str, Any]:
+    rules_path = rules_path.resolve()
+    manifest_path = rules_path.parent / "MANIFEST.json"
+    if not rules_path.is_file():
+        raise ValueError(f"worker rules missing: {rules_path}")
+    if not manifest_path.is_file():
+        raise ValueError(f"worker-rules manifest missing: {manifest_path}")
+    try:
+        recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"worker-rules manifest unreadable: {exc}") from exc
+    actual = current_payload(rules_path)
+    for key in ("format", "revision", "path", "sha256", "protocol_dir", "protocol_fingerprint", "protocol"):
+        if recorded.get(key) != actual[key]:
+            raise ValueError(f"immutable worker-rules revision changed after creation: {key} differs from manifest")
+    return {
+        **actual,
+        "manifest": str(manifest_path.resolve()),
+        "manifest_sha256": sha256_file(manifest_path),
+    }
