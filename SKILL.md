@@ -1,17 +1,15 @@
 ---
 name: deepseek-and-destroy
-description: "Continuously execute a complex multi-phase implementation plan through configurable worker-agent loops until the plan is complete or a genuinely human-level blocker is reached. Uses worker-produced discovery and proof obligations, fresh implementation/review contexts, reviewer-led repair, fresh re-review, durable multi-orchestrator state, and main-orchestrator phase gates. Defaults to OpenCode with DeepSeek V4 Flash."
+description: "Continuously execute a complex implementation plan with a token-frugal expert orchestrator and cheap external worker agents until completion or a genuine human blocker. Defaults to DeepSeek V4 Flash through OpenCode CLI, durable path-only task contracts, independent review/proof, mechanical evidence gates, and harness-adaptive quiescent waiting."
 license: MIT
-compatibility: codex, claude-code, opencode, kilo-code, and comparable coding harnesses
+compatibility: codex, claude-code, opencode, and comparable coding harnesses; optional contributed adapters may exist
 metadata:
-  default-harness: opencode
-  default-model: opencode-go/deepseek-v4-flash
-  review-rounds-budget: "5"
-  transport-attempt-budget: "5"
-  startup-liveness-grace-seconds: "90"
+  default-worker-harness: opencode-cli
+  default-worker-model: opencode-go/deepseek-v4-flash
   workspace-root: DeepSeekAndDestroy
   pass-standard: zero task-relevant findings
-  completion-contract: plan-complete-or-human-blocked
+  review-rounds-budget: "5"
+  transport-attempt-budget: "5"
   context-checkpoint-due-percent: "65"
   context-compact-before-percent: "75"
   context-hard-ceiling-percent: "80"
@@ -19,442 +17,368 @@ metadata:
 
 # DeepSeek and Destroy
 
-> Feed it a plan. Keep going until the plan is done—or until a human is genuinely required.
+> Spend premium context on authority and judgment. Make cheap workers and mechanical
+> helpers own the volume.
 
-You are the **main orchestrator** for a complex implementation plan. You own
-plan-wide understanding, decomposition, routing, escalation decisions, and phase
-approval. Cheap workers perform the repository-scale and tool-heavy work:
-surveys, discovery, implementation, verification, review, repair, recovery, and
-phase evidence synthesis.
+DSD executes a complex plan continuously until the whole plan is complete or a
+human is genuinely required.
 
-> **Workers execute and establish technical facts. The orchestrator routes,
-> decides, and approves.**
+The normal topology is:
 
-The main orchestrator is not a second implementer, reviewer, or test runner. A
-technical doubt is a routing event: send the exact disputed predicate to a fresh
-worker. Do not resolve it by rereading code, rerunning tests, reparsing artifacts,
-or fixing project files yourself.
+```text
+premium orchestrator (Claude / Codex / OpenCode / other)
+        │
+        ├─ authority, decomposition, sharp risks, decisions, phase approval
+        │
+        ▼
+external OpenCode CLI worker
+`opencode run --model opencode-go/deepseek-v4-flash ...`
+        │
+        ├─ survey / discovery / implementation / review / repair / verification
+        └─ durable evidence
+```
 
-## Mission contract
+The orchestrator harness and worker harness are independent. Claude/Codex native
+*subagent* events do not describe the default external OpenCode worker. Harness
+adapters only choose the cheapest native way to launch/wait/checkpoint around that
+external process.
 
-Continue autonomously until one of these terminal states is true:
+## 1. Authority boundary
 
-- **COMPLETED** — the whole plan, verification, delivery artifacts, progress
-  records, and required handover are complete;
-- **HUMAN-BLOCKED** — progress genuinely requires human authority, access,
-  authorization, unavailable credentials/devices/environments, or restoration of
-  worker capacity;
-- **PAUSED-BY-USER** — the user explicitly paused execution;
-- **ABANDONED** — the user explicitly abandoned it.
+> **Authority reading and judgment belong to the orchestrator. Repository-scale
+> investigation belongs to workers. Clerical reconciliation belongs to helpers or
+> the Evidence Clerk.**
 
-A task PASS, review FAIL, phase PASS, retry, compaction, session boundary, or
-worker crash is not a stopping point.
+The orchestrator MUST personally read at new-run/fresh-session intake:
 
-After every transition:
+- current user instructions;
+- applicable project instructions (`AGENTS.md` or equivalent);
+- authoritative plan;
+- architecture/design/contracts needed to understand the current phase.
 
-1. persist the result;
+This is governance reading, not repository investigation. Do not let the
+worker-authority rule push the orchestrator away from the sources it must judge.
+
+The orchestrator does NOT personally perform repository-wide discovery, caller
+tracing, broad source review, test execution, artifact mining, implementation,
+repair, or technical re-measurement. Route those to workers.
+
+When a technical fact is disputed, route the exact predicate to a fresh worker or
+Evidence Clerk. Do not defensively re-run the investigation in premium context.
+
+Read `orchestrator/CONTROL.md` for the detailed premium-context/trust/wait policy.
+
+## 2. Terminal mission
+
+Continue autonomously until exactly one terminal state is true:
+
+- **COMPLETED** — the whole plan, required verification, delivery/progress records,
+  and final continuity artifacts are complete;
+- **HUMAN-BLOCKED** — progress requires human authority/access/credential/device/
+  environment or worker capacity that automation cannot supply;
+- **PAUSED-BY-USER** — explicitly paused;
+- **ABANDONED** — explicitly abandoned.
+
+A task PASS, task FAIL, repair, phase PASS, retry, worker crash, wait timeout,
+compaction, or fresh session is not a stopping point.
+
+After every material transition:
+
+1. persist reality in `state.json`;
 2. persist one exact `next_action`;
-3. perform that action immediately.
-
-Before yielding an active orchestrator turn, either a worker is actually live, a
-persisted wait/probe/backoff is active, or the run is in a terminal state.
-“Launching X next” is an intention, not an action.
-
-Keep user-facing narration sparse. Routine worker transitions belong in run
-artifacts. Surface only material corrections, human blockers, major plan-wide
-decisions, phase completion, and final completion.
-
-## Decision authority
-
-Resolve decisions in this order:
-
-1. explicit current user instructions;
-2. authoritative plan, goals, scope, ethos, dependencies, and acceptance criteria;
-3. project instructions and referenced architecture/design/schema documents;
-4. established public contracts, canonical code patterns, tests, accepted phase
-   evidence, and actual runtime/data behavior;
-5. prior run decisions and major findings;
-6. conservative engineering judgment preserving project intent.
-
-Do not ask the human to decide ordinary implementation choices already answerable
-from project authority. If resolving a question requires substantial repository
-exploration or measurement, commission a Discovery/Survey worker and decide from
-its durable evidence.
-
-## Required companion files
-
-Read and use these files when applicable:
-
-- `WORKSPACE.md` — durable run state, plan snapshots, concurrency, recovery,
-  Decision Packets, major findings;
-- `PROMPTS.md` — canonical worker prompt envelopes;
-- `worker/SKILL.md` — compact Worker Core proof discipline;
-- `worker/BUILD.md` — implementer/fixer protocol;
-- `worker/REVIEW.md` — reviewer/verifier/auditor protocol;
-- `worker/PROOF-PATTERNS.md` — small task-relevant proof recipes;
-- `HARNESS.md`, `COMPACTION.md` — harness selection and durable context
-  checkpointing;
-- `CODEX.md`, `CLAUDE.md`, `OPENCODE.md`, `KILOCODE.md` — harness adapters;
-- `CONFIG.example.md` — optional routing/project overrides.
-
-Helpers:
-
-- `scripts/check_state.py` — state/turn-exit invariants;
-- `scripts/check_review_contract.py` — structural proof-matrix/fast-path contract;
-- `scripts/decision_packet.py` — compact Decision Packet extraction;
-- `scripts/scope_snapshot.py` — content-hash scope evidence;
-- `scripts/opencode_probe.py` — isolated OpenCode health probe;
-- `scripts/context_checkpoint.py` — immutable context checkpoints;
-- `scripts/detect_harness.py`, `scripts/install_compaction_adapter.py` — harness
-  adapter setup;
-- `scripts/install_kilo_agents.py` — Kilo worker installation.
-
-If a required effective companion is missing, recover it or enter
-`HUMAN-BLOCKED`; do not silently improvise a weaker protocol.
-
-## Worker protocol assembly
-
-Before the first worker spawn, read `PROMPTS.md` and `worker/SKILL.md`.
-
-Every worker receives:
-
-1. the canonical Common Rules from `PROMPTS.md`;
-2. the compact Worker Core from `worker/SKILL.md`;
-3. exactly one appropriate role protocol:
-   - implementer/fixer → `worker/BUILD.md`;
-   - reviewer/verifier/phase auditor/recovery auditor → `worker/REVIEW.md`;
-   - survey/discovery → Worker Core plus the discovery/survey role envelope;
-4. only the proof-pattern recipes relevant to the task from
-   `worker/PROOF-PATTERNS.md`;
-5. the exact project/task paths, plan reference, proof obligations, acceptance
-   criteria, exclusions, verification, report path, and major-log path.
-
-This is **mechanical prompt assembly**, not a new orchestrator investigation job.
-Discovery/Survey workers should recommend proof-pattern tags for non-trivial tasks.
-The orchestrator normally forwards those tags rather than inventing a large
-review theory itself.
-
-Keep task-specific prompt material minimum-sufficient. Reference durable briefs by
-path. Do not inline large reports/artifacts. If the prompt becomes large because
-construction facts are missing, commission Discovery rather than making the
-orchestrator rediscover the repository.
-
-## Worker proof doctrine
-
-The central proof rule is:
-
-> **An expected outcome is not proof. Establish why the outcome occurred and that
-> the production mechanism named by the acceptance criterion was actually
-> reached.**
-
-Tests are evidence only when they discriminate correct behavior from plausible
-wrong implementations. A test that passes or fails for the wrong reason is a
-finding, even when the final boolean/result is what the test expected.
-
-For risky criteria, use **counterexample-first review**: identify at least one
-plausible broken implementation that could still look green. If the supplied
-evidence would not fail that counterexample, the criterion lacks sufficient proof.
-
-Examples of applicable proof dimensions include cardinality/multi-member behavior,
-negative/fail-closed gates, exact identity/parentage, durability across fresh
-runtime instances, dependency direction, and distinct predicates for distinct
-status gates. These are represented by proof-pattern tags, not universal domain
-rules.
-
-## Intake and durable run state
+3. execute it immediately.
+
+Before yielding an active turn, either a worker is actually active, a persisted
+wait/backoff/compaction is active, or the run is terminal.
+
+## 3. Core files
+
+Read only what the current action needs:
+
+- `orchestrator/CONTROL.md` — premium context, trust, narration, waiting, zero-change
+  guard, phase barrier;
+- `WORKSPACE.md` — run layout/state/evidence/continuity;
+- `PROMPTS.md` — compact durable task-contract and path-only handoff format;
+- `worker/SKILL.md` — Worker Core;
+- `worker/ROLES.md` — single authoritative role boundaries/terminal statuses;
+- `worker/BUILD.md` — implementer/fixer;
+- `worker/REVIEW.md` — reviewer/verifier/auditor;
+- `worker/EVIDENCE.md` — Evidence Clerk;
+- `worker/PROOF-PATTERNS.md` — small task-specific proof recipes;
+- `HARNESS.md` — separate orchestrator-harness vs worker-harness selection;
+- `OPENCODE.md` — default OpenCode CLI worker transport/storage;
+- `CLAUDE.md`, `CODEX.md` — orchestrator-specific wait + compaction behavior;
+- `COMPACTION.md` — harness-neutral durable context checkpoints;
+- `CONFIG.example.md` — optional overrides.
+
+Primary helpers:
+
+- `scripts/prepare_worker_rules.py` — create immutable versioned worker-protocol/rules snapshots;
+- `scripts/render_task_contract.py` — render/freeze a numbered contract from compact task slots;
+- `scripts/render_worker_prompt.py` — tiny path-only launch prompt;
+- `scripts/run_worker.py` — external OpenCode worker launcher/event producer;
+- `scripts/wait_worker.py` — portable long blocking wait;
+- `scripts/evidence_gate.py` — cheap terminal evidence gate;
+- `scripts/check_review_contract.py` — Proof Matrix/fast-path structure;
+- `scripts/scope_snapshot.py` — content-hash scope facts;
+- `scripts/check_state.py` — control-plane invariants;
+- `scripts/decision_packet.py` — extract the compact parent-facing packet;
+- checkpoint/harness helpers documented in `COMPACTION.md`/`HARNESS.md`.
+
+Optional contributed adapters are not part of the default design and must not
+shape core behavior unless explicitly selected.
+
+## 4. Intake / resume
+
+### New run or fresh orchestrator session
+
+1. Read governing sources personally as required by §1.
+2. Create/resume the run per `WORKSPACE.md`.
+3. Snapshot/hash plan/authority and update `authority-index.json`.
+4. Resolve **orchestrator harness** and **worker harness** separately.
+5. Default worker harness/model to OpenCode CLI +
+   `opencode-go/deepseek-v4-flash` unless user/config says otherwise.
+6. Install/verify only the applicable orchestrator harness adapter.
+7. Resolve one external OpenCode run DB outside the project tree when OpenCode is
+   the worker harness.
+8. Generate immutable worker-rules revision `worker-rules/r0001/` (`WORKER_RULES.md` + `MANIFEST.json` + protocol snapshot) with `prepare_worker_rules.py`; later rule changes create `r0002`, never overwrite `r0001`.
+9. Persist the exact worker-rules revision/rules hash/manifest hash/protocol fingerprint in `state.json`, reconcile state, set exact `next_action`, continue.
+
+### Handover trust
+
+`HANDOVER.md` is continuity input, **not technical authority**. Technical claims in
+it are prior-session assertions. Before repeating/escalating/building a new
+plan-wide decision on one, follow its cited primary/accepted evidence. Missing or
+contradictory evidence becomes a worker routing event.
+
+Mechanical helper facts (hashes, file existence, captured exits/process identity)
+are trusted only when the **current immutable contract/state binds the exact
+artifact/attempt identity**. A stale baseline from an older contract is not a given
+fact. Semantic claims are never upgraded merely because they are serialized.
+
+## 5. Plan → phase → independently reviewable task
+
+Before first decomposition of a phase—or after material authority/tree drift—use a
+Phase Surveyor when repository measurement is needed.
+
+One worker task should contain one independently reviewable primary unit. One
+behavior plus tightly coupled tests can be one unit. Separately reviewable wiring,
+generated clients, fixture migrations, artifact/browser batteries, and broad
+verification should be split when they can pass/fail independently.
+
+For unfamiliar/cross-cutting work, Discovery first produces a durable construction
+brief: exact files/symbols/data flow/call paths, boundaries, exclusions, first edit,
+acceptance/proof obligations, verification, and evidence-clerk checks when useful.
+
+For each real behavioral criterion use stable `AC-*` ids. Builder and reviewer see
+the same Proof Obligations.
+
+### Hard two-zero-change rule
+
+A substantial mutating attempt that changes none of the intended artifacts and
+does not prove the task already satisfied is a decomposition warning.
+
+After **two consecutive zero-intended-change attempts against the same durable
+contract**, set `decomposition_required: true`. A third mutating attempt against
+that contract is forbidden. Split/re-scope, commission Discovery, or create a
+construction-ready brief first.
+
+## 6. Durable contract, not hand-written prompt
+
+Do not retype Common Rules/harness preambles per worker.
+
+Each run has one or more **immutable worker-rules revisions** under
+`worker-rules/rNNNN/`; a new revision is created only when stable run-level worker
+rules actually change. Each task uses one current immutable numbered contract
+revision containing the changing decision surface: unit, objective, <=3 sharp risk
+hypotheses, acceptance/proof contract, task-output/evidence expectations, mechanical
+references, and an exact `Allowed source changes` list for any role permitted to
+mutate project files. The role-specific report path stays in the immutable launch
+handoff. Prefer
+`render_task_contract.py` so the orchestrator supplies compact slots rather than
+re-authoring the Markdown frame.
 
-On activation:
-
-1. identify authoritative plan and project instruction sources;
-2. create/resume the run according to `WORKSPACE.md`;
-3. snapshot/hash the authoritative plan and build/update the authority index;
-4. resolve orchestrator harness independently from worker harness;
-5. install/verify context checkpoint adapter;
-6. resolve worker profiles/fallbacks;
-7. read the selected harness adapter;
-8. set exact `next_action` and continue.
+Use `render_worker_prompt.py`. The resulting launch message is path-only and
+normally under ~150 words. If the orchestrator is writing a multi-kilobyte worker
+prompt, the flow is wrong.
 
-`state.json` must describe reality, not intention. Before **every worker launch** it
-must reflect the current phase/task, accepted/reopened/needs-revalidation/
-superseded states, live worker identity if any, plan hash, and exact next action.
-A stale state file is a launch blocker.
+Stable environment constraints known at run creation belong in the current
+immutable worker-rules revision (e.g. a fixed path/shell rule actually required by
+that environment), not copied into every prompt. A newly discovered **stable
+run-level** constraint creates the next `worker-rules/rNNNN` revision. A changing
+task-specific fact belongs in the next task-contract revision. Never rewrite either
+kind of historical authority.
 
-`HANDOVER.md` is not a second execution log. Keep it compact and update it whenever
-resume semantics materially change: plan/user instructions, phase/remediation
-cycle, reopened prerequisites, task supersession, important learned harness or
-architecture quirks, material corrections, human blockers, or compaction/session
-handoff. It must never contradict `state.json`.
+## 7. Worker execution / wait
 
-## Context checkpoint contract
+Before a worker attempt:
 
-Use `COMPACTION.md`. Default policy:
-
-- checkpoint due at 65% when measurable;
-- compact at the next safe boundary, normally before 75%;
-- start no new substantial phase-level reasoning at 80%;
-- when percentage is unavailable, use native hooks plus periodic safe-boundary
-  checkpoints (default every 4 accepted tasks and before a long phase gate).
+1. capture the **full project source baseline** for the attempt, excluding only `DeepSeekAndDestroy/`; this is mandatory for terminal evidence gating of mutating and read-only roles;
+2. create/freeze the task contract, including exact project-relative `Allowed source changes` for Implementer/Fixer (and an explicitly assigned Clerk progress/documentation file, if any), then render the tiny prompt against one exact worker-rules revision;
+3. `run_worker.py` atomically reserves the numbered attempt/report/log, validates the worker-rules manifest, binds the exact launch-prompt, task-contract, worker-rules revision/manifest, and scope-baseline paths/hashes, launches `opencode run` against the external run DB, and writes durable attempt/process information; reusing an attempt/report/event path is forbidden;
+4. the orchestrator enters **quiescent wait** using its harness adapter;
+5. actual OpenCode process exit produces `terminal.json`; classify that terminal status **before** reading the worker report;
+6. only `status=completed` with exit code 0 enters `evidence_gate.py`;
+7. the gate recomputes scope against the full tracked + untracked-nonignored Git baseline: every read-only role requires zero project changes; mutating roles may change only the task's exact allowed paths/prefixes; acceptance-relevant ignored/generated outputs need explicit artifact verification;
+8. `process-error` after a real worker started enters suspect-change/recovery because it may have mutated source before dying; a pre-start `transport-error` enters transport/availability handling;
+9. route a completed-run clerical/provenance/measurement discrepancy to the Evidence Clerk rather than doing forensics in premium context.
 
-Checkpointing is mostly mechanical. Maintain `HANDOVER.md` incrementally. After
-compaction/session replacement, no project work continues until the skill, handover,
-state, latest checkpoint, and plan identity are reloaded and `verify-resume`
-restores continuity. Then execute persisted `next_action` immediately.
-
-## Phase survey and decomposition
-
-Before first decomposition of a phase—or after material plan/tree drift—commission
-a fresh Phase Surveyor. Reuse the survey after routine accepted tasks until drift
-invalidates it.
-
-Before every worker spawn, count **independently reviewable units**. Default to one
-unit per task. One behavior plus directly coupled tests can be one unit; separately
-reviewable wiring, generated clients, fixture migration, artifact audits, browser
-batteries, and full-suite runs should normally be separate.
-
-If a task requires substantial unfamiliar discovery, commission Discovery first.
-For decided large mechanical work, require a construction-ready brief containing:
-
-- exact files and symbols;
-- boundaries/moves/wiring;
-- exclusions/non-goals;
-- first edit/checkpoint;
-- acceptance and verification;
-- proof obligations and recommended proof-pattern tags.
-
-A substantial first attempt that mainly investigates, changes none of the intended
-artifacts, and then dies/hangs is a decomposition/prescription failure. Do not
-repeat the same vague prompt; split the work or improve the construction brief.
-
-## Acceptance criteria and proof obligations
-
-Every meaningful acceptance criterion gets a stable ID such as `AC-001`.
-
-For non-trivial behavioral criteria, the task artifact also records a compact
-**Proof Obligation** describing the minimum evidence needed. It should identify,
-when relevant:
-
-- production mechanism that must be reached;
-- required positive and/or negative path;
-- required dimensions such as scale/cardinality, identity, durability, or
-  dependency direction;
-- one plausible counterexample the evidence must defeat;
-- applicable proof-pattern tags.
-
-Discovery should produce these obligations when substantial repository knowledge
-is needed. The orchestrator does not personally devise detailed semantic tests.
-
-The implementer and independent reviewer receive the **same proof obligations**.
-The implementer builds evidence against them; the reviewer independently validates
-that evidence and may add a missing proof pattern when the implementation reveals
-one.
+Do not periodically poll CPU/logs during normal execution. Process/CPU/log liveness
+checks are recovery diagnostics after a real wait/tool inconsistency.
 
-A plan-explicit dimension must be transcribed into the acceptance/proof contract;
-do not rely on a worker to infer it from vague prose. Examples: multi-member scale,
-exact per-target identity, fail-closed rejection, durable restart, per-kind evidence,
-or independent approval authority.
+## 8. Worker engineering/proof
 
-## Launch and liveness
+Workers read the run-local snapshot of Worker Core + role protocol.
 
-Before mutating workers, capture a fresh content-hash scope baseline against the
-immediately previous accepted tree. Preservation baselines are immutable; rolling
-scope baselines refresh after accepted mutations.
+The universal proof doctrine is:
 
-After launch, persist real attempt identity immediately. Mark `in-progress` only
-after positive liveness or a complete report proves the attempt actually ran.
+> **An expected outcome is not proof. Show that the named production mechanism was
+> reached and caused the result.**
 
-Never infer stability from modification times or `git status` letters. Use content
-hashes/diffs.
+For high-risk criteria, use counterexample-first evidence. Required dimensions such
+as cardinality, exact identity, fail-closed rejection, independent authority,
+durability across fresh instances, dependency direction, or per-target behavior
+must be exercised explicitly.
 
-Never launch a duplicate worker for the same task/role merely because monitoring is
-ambiguous. First reconcile the possibly-live attempt using saved process/session
-identity, process existence, liveness signals, state, and report/log growth. A
-duplicate launch on one task is an incident and triggers reconciliation/recovery.
-Harness-specific PID/storage rules live in the adapter.
+Workers do not get a routine “reality differs, stop and ask” escape hatch. They
+resolve ordinary mismatch from governing authority and build the smallest complete
+honest project-aligned solution. Escalation is only for a real authority/access/
+ownership boundary.
 
-## Reviewer contract and fast path
+## 9. Reporting / immutable terminal evidence
 
-A fresh independent Reviewer inspects actual implementation and executes targeted
-verification. It produces:
+Every worker report begins with a compact Decision Packet. Reviewer reports add a
+Proof Matrix. Long logs/inventories remain in evidence files.
 
-1. a compact Decision Packet;
-2. a **Proof Matrix** with one row per acceptance criterion;
-3. detailed findings/evidence;
-4. a literal verdict marker.
+`DSD_REPORT_STATUS: FINAL` is required for terminal evidence. The launcher may
+pre-create a `SKELETON`; a skeleton is never a substantive FAIL/PASS.
 
-The Proof Matrix records, per AC:
+After FINAL, worker report/evidence is immutable. Later repair/review uses a new
+numbered attempt/report. `run_worker.py` reserves each attempt path atomically so a
+duplicate launch cannot race or overwrite prior evidence. Workers must stop any
+task-owned background writer before FINAL unless the contract explicitly transfers
+it to managed infrastructure. Do not append newer counts or gate findings into old
+terminal evidence.
 
-- whether the named production mechanism was reached;
-- positive-path disposition;
-- negative-path disposition when applicable;
-- required dimensions exercised;
-- counterexample defeated or why not applicable;
-- PASS/FAIL.
+The orchestrator reads Decision Packets by default, not full reports. If one
+judgment requires >3 deep evidence/source slices, delegate compression or
+checkpoint rather than loading a dossier.
 
-The reviewer must explain **why** a decisive test passed/failed at the criterion
-level. It need not narrate every assertion. A PASS based only on an observed
-boolean/test status without a mechanism explanation is structurally incomplete.
+## 10. Mechanical evidence gate / Evidence Clerk
 
-A task may use the orchestrator fast path only when all are true:
+Worker reports are claims until the terminal gate is clean.
 
-- fresh independent reviewer verdict is PASS;
-- Decision Packet is complete and internally consistent;
-- Proof Matrix covers every `AC-*` and all rows PASS;
-- required proof patterns are dispositioned;
-- required verification reports pass;
-- scope/preservation evidence is clean;
-- `TASK-RELEVANT DEFECTS: NONE` is stated;
-- `FAST-PATH ELIGIBLE: YES` is stated;
-- no conflicting evidence/material correction exists;
-- `scripts/check_review_contract.py` (or equivalent structural validation) accepts
-  the review contract.
+`evidence_gate.py` mechanically checks what can be checked cheaply:
 
-On that path, accept immediately. Do **not** reread code, rerun tests, or recreate
-review measurements.
+- expected report exists and is FINAL rather than skeleton;
+- reviewer Proof Matrix/fast-path structure is internally consistent;
+- declared verification count arithmetic reconciles, including obvious prose summaries such as `17 tests / 14 pass / 2 fail`;
+- every terminal role has a full source baseline; read-only roles changed nothing and mutating roles stayed inside `Allowed source changes`;
+- task/report declares whether deeper provenance/tripwire reconciliation is needed.
 
-Any missing/contradictory proof is routed to a fresh worker, not investigated by
-the orchestrator.
+When the gate returns **CLERK REQUIRED**, launch an Evidence Clerk using the same
+cheap worker profile. The clerk may re-derive exact measurements, verify provenance
+against the actual task-start baseline, recover a misplaced report from the worker
+log, reconcile technical major-log entries, and maintain assigned progress/handover
+artifacts. It never approves the task or edits `state.json`.
 
-### Wrong-reason evidence
+Before Clerk launch, capture the same full source baseline excluding **only** `DeepSeekAndDestroy/`. The Clerk task itself declares `Evidence Clerk Checks: NONE` so reconciliation does not recurse. A configured project progress/documentation file may be changed only when its exact relative path is also listed in that Clerk task's `Allowed source changes`; product source/tests remain read-only. Gate the Clerk report/scope first and persist that clean gate JSON; only then rerun the original evidence gate with both `--clerk-report` and its matching `--clerk-gate`.
 
-A reviewer must fail a criterion when the expected outcome is caused by an
-unrelated harness/setup/short-circuit condition rather than the named mechanism.
-Typical false causes include empty fixtures/replays, cap-limited dispatch, setup
-exceptions, bypassing mocks, same-instance-only effects, missing targets, vacuous
-conditions, shared predicates proving different gates, or self-attested approval.
+A `CLERK VERDICT: CLEAN` may satisfy **declared clerical claims** such as provenance, tripwire remeasurement, or corrected verification arithmetic when it names every assigned check id. That Clerk report becomes the clerical **overlay** for those IDs: keep the original FINAL immutable, but downstream decisions use the Clerk-corrected values and must not repeat stale originals. CLEAN may not waive a missing/skeleton/malformed FINAL report or any source-scope violation. A misplaced FINAL may be copied byte-for-byte to the canonical path by the Clerk and then re-gated; source movement enters recovery.
 
-### Known limitations and consequence failures
+The orchestrator does not write technical major-findings essays that can be derived
+from worker evidence.
 
-A correctness defect affecting a required acceptance dimension is **not** a “known
-limitation,” cleanup item, or technical debt. It is a task FAIL.
+## 11. Review → repair → fresh re-review
 
-Allowed dispositions are:
+Default:
 
-- task-relevant correctness defect → FAIL;
-- intentional downstream contract consequence with a concrete named closure task
-  already scheduled → current task may pass, but the **phase remains blocked**
-  until closure passes;
-- genuinely unrelated/pre-existing defect → defect ledger.
-
-Any reviewer-recorded task-relevant defect automatically means
-`FAST-PATH ELIGIBLE: NO`.
-
-When corrected behavior breaks a maintained suite, the reviewer must classify it
-as hidden regression, intentional contract consequence, or unrelated defect. An
-intentional consequence needs a concrete closure task ID; “phase coordination” or
-“follow up later” is not a complete disposition.
-
-## Review → repair → fresh re-review
-
-Default loop:
-
-1. fresh implementer;
+1. implementer;
 2. fresh independent reviewer;
-3. reviewer PASS → fast-path acceptance when structurally eligible;
-4. reviewer FAIL → repair;
-5. fresh independent reviewer checks repaired result.
+3. evidence gate / clerk reconciliation if required;
+4. PASS + clean evidence → accept;
+5. FAIL → fixer;
+6. fresh independent reviewer against repaired state.
 
-Normally resume the reviewer as fixer when its context is moderate and useful.
-After a heavy review (large browser/artifact/mutation/full-suite work) prefer a
-fresh fixer with serialized findings because the review session may be
-context-depleted.
+Supply at most three sharp falsifiable risk hypotheses beyond the standard review
+contract. Attack them by execution, not generic prose.
 
-Fixers address the findings only; they do not self-approve. A fresh reviewer must
-re-establish the Proof Matrix after repair.
+Avoid redundant expensive proof. Implementer owns terminal verification of its
+final state. Reviewer re-runs targeted discriminating checks and explicit
+independent requirements. Heavy/full/live verification belongs to a Verification
+Worker when assigned. If that verification **generates or mutates an accepted
+project artifact**, it is a writer and must finish before the phase write barrier
+closes (or run in an isolated temporary location). Post-barrier verification must
+be read-only for accepted project artifacts. Any later code/artifact change reopens
+the barrier and invalidates evidence it makes stale. Authoritative acceptance
+requirements always win.
 
-## Reopened prerequisites and stale contracts
+Fast-path acceptance requires all of:
 
-When an accepted prerequisite is reopened or materially corrected, mark dependent
-work **NEEDS-REVALIDATION** before continuing it. Do not automatically assume all
-such work is invalid, but do not keep executing stale contracts either.
+- fresh independent reviewer PASS;
+- every task AC covered and PASS in Proof Matrix;
+- required verification PASS;
+- source/scope/preservation clean;
+- `TASK-RELEVANT DEFECTS: NONE`;
+- `FAST-PATH ELIGIBLE: YES`;
+- `evidence_gate.py` clean, including any required clerk reconciliation;
+- no conflicting accepted evidence.
 
-Commission a cheap bounded revalidation when necessary:
+Then accept immediately. Do not reread code/rerun tests/recompute counts.
 
-- unchanged contract remains compatible → `STILL-VALID`;
-- dependency changed acceptance/proof assumptions → `SUPERSEDED`, then create a
-  replacement task/contract.
+## 12. Reopened prerequisites
 
-Record the transition in state before launching dependent work.
+If an accepted prerequisite materially changes, dependent work becomes
+`needs-revalidation` before continuation.
 
-## Worker failure and suspect changes
+Cheap revalidation determines:
 
-If a worker exits without a complete trustworthy report, is killed, times out, or
-loses transport after starting work:
+- `still-valid` — contract/proof assumptions remain valid;
+- `superseded` — old task contract is invalid; create a replacement.
 
-1. mark `suspect-changes`;
-2. confirm the worker cannot still write;
-3. capture mechanical before/after content evidence;
-4. commission a fresh Recovery Auditor for non-obvious changes;
-5. orchestrator decides adopt-for-review/quarantine/revert/additional evidence;
-6. refresh state/survey as needed;
-7. only then retry/split/relaunch.
+Do not continue a stale task merely because it already has a report.
 
-“No report” never means “no changes.”
+## 13. Worker failure / availability
 
-## Worker availability
+Reportless/forced exit after work began means `suspect-changes`, never “no changes.”
+Confirm the process can no longer write, capture mechanical scope evidence, and use
+Recovery Auditor when disposition is not obvious.
 
-Transport/provider/quota/auth failures do not authorize orchestrator takeover.
+Provider/quota/auth/transport failure never authorizes premium-orchestrator
+implementation. Use the smallest exact-model health probe, persisted backoff, and
+configured fallback. Human-block only for genuine external intervention.
 
-For suspected availability incidents:
+## 14. Phase gate
 
-1. preserve exact state;
-2. run the smallest authorized health probe against the exact model/profile;
-3. distinguish task failure from transport/provider failure;
-4. for transient incidents persist `WAITING-FOR-WORKER`, `next_probe_at`, backoff,
-   and relaunch action;
-5. use configured equivalent fallback if healthy;
-6. escalate `HUMAN-BLOCKED` only when external intervention is truly required.
+When required phase tasks are provisionally accepted:
 
-Do not infer billing exhaustion from an error string alone.
+1. finish **all phase-owned writers**, including any Verification Worker that creates
+   or updates generated/project artifacts; such verification must run before the
+   barrier closes or use an explicitly isolated temporary output outside the frozen
+   phase state;
+2. require those writers' terminal evidence/evidence gates to settle, then close the
+   phase **write barrier** and capture the mechanical gate snapshot;
+3. run only required **read-only** post-barrier Verification Workers against that
+   frozen state;
+4. run a fresh Phase Auditor against the same frozen state;
+5. orchestrator reads the compact audit/authority and makes the plan-wide decision;
+6. findings become immutable bounded remediation tasks;
+7. any repair or other phase-owned mutation reopens the barrier and invalidates the
+   old phase verification/audit/gate snapshot;
+8. finish new writers, re-close the barrier, and repeat read-only verification/audit
+   on the new frozen state;
+9. approve only when the whole phase contract is clean.
 
-## Phase gate
+The orchestrator does not implement or do repository-scale phase review. Authority
+reading and phase judgment remain its job.
 
-When all planned phase tasks are provisionally accepted:
+## 15. Context / user communication
 
-1. run required phase-level Verification Workers;
-2. commission a fresh Phase Auditor;
-3. Phase Auditor checks every phase requirement against accepted task evidence and
-   builds a **Proof Coverage** view from the accumulated proof obligations;
-4. any required dimension with no accepted evidence is a blocker;
-5. orchestrator reads plan/phase authority + compact Phase Auditor packet and makes
-   the plan-wide judgment;
-6. any factual doubt → fresh targeted worker;
-7. any phase finding → immutable `phase-remediation-<n>.md` with bounded worker
-   tasks, acceptance/proof obligations, verification, dependencies, exclusions;
-8. workers implement/verify/review remediation;
-9. fresh phase verification + fresh Phase Auditor;
-10. repeat until evidence is clean, then approve phase and continue immediately.
+Use `COMPACTION.md`. Durable state is authoritative; native summaries are advisory.
 
-The Phase Auditor must not rediscover the entire repository. It audits the declared
-phase requirements/proof obligations and identifies missing, contradictory, stale,
-or unexercised required dimensions. Raw heavy verification stays with Verification
-Workers.
+Routine launch/wait/pass/fix transitions are not user-visible events. When a host
+forces a routine update, use one sentence <=25 words. Expanded prose is only for
+material correction, human blocker, consequential decision, phase result, direct
+user request, or final completion.
 
-A maintained consequence suite affected by phase changes must be clean before the
-phase passes. A scheduled closure task can allow an earlier task to pass, never the
-phase containing the unresolved consequence.
-
-The orchestrator never implements or self-verifies a phase remediation.
-
-## Material corrections
-
-When a prior material claim was wrong:
-
-1. correct it plainly;
-2. append a correction entry to `major-findings-and-fixes.md`;
-3. repair affected state/tasks/acceptance decisions;
-4. revalidate dependencies when required;
-5. continue unless a human blocker results.
-
-Surface the correction to the user only when it changes a user-visible acceptance,
-direction, material risk, or required human action.
-
-## Completion
-
-Before declaring COMPLETED, require fresh final verification appropriate to the
-plan, clean phase evidence, no unresolved required consequence tasks, current
-state/HANDOVER, required delivery/package artifacts, and any authorized live-test
-results.
-
-If live/destructive/paid/external testing is required but not authorized, complete
-all non-live work first and enter the appropriate human gate with exact test
-instructions/evidence requirements rather than stopping earlier.
+Never estimate token usage. Use exact host counters only when exposed.
