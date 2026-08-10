@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
 AC_RE = re.compile(r"\bAC-\d+\b", re.IGNORECASE)
@@ -81,7 +82,7 @@ def parse_matrix(text: str) -> dict[str, dict[str, str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", type=Path, required=True, help="task.md or equivalent contract")
+    parser.add_argument("--task", type=Path, required=True, help="immutable DSD task-contract revision")
     parser.add_argument("--review", type=Path, required=True, help="review report")
     parser.add_argument("--require-pass", action="store_true", help="also require reviewer PASS + all rows PASS")
     parser.add_argument("--json", action="store_true", help="emit machine-readable result")
