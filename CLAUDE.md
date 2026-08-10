@@ -1,57 +1,96 @@
 # DeepSeek and Destroy — Claude Code Orchestrator Adapter
 
-Use this file when the **main orchestrator** is Claude Code. Worker agents may use
-another configured harness.
+Use this only when the **premium orchestrator** runs in Claude Code. The default
+technical worker remains the external OpenCode CLI DeepSeek process documented in
+`OPENCODE.md`.
 
-## Supported mechanism
+## External OpenCode worker: hook-driven re-wake
 
-Claude Code supports `PreCompact`, `PostCompact`, and `SessionStart` hooks.
-`SessionStart` with matcher `compact` runs after automatic or manual compaction and
-can add context back to Claude.
+Claude's native subagent hooks do **not** observe DSD's normal worker because that
+worker is an external `opencode run` process. DSD instead uses Claude Code's
+project hooks around the Bash launch boundary.
 
-## Install
+Install/verify the project adapter:
 
 ```bash
-python3 <skill-root>/scripts/install_compaction_adapter.py \
+python3 <skill-root>/scripts/install_harness_adapter.py \
   --harness claude-code \
   --project-root <project-root>
 ```
 
-This merges project-local hooks into `.claude/settings.json` and installs the
-checkpoint helper under `DeepSeekAndDestroy/tools/`.
+Besides the compaction hooks below, this installs
+`DeepSeekAndDestroy/tools/claude_worker_rewake.py` and a `PostToolUse` hook for
+`Bash` with `asyncRewake: true`.
 
-## Threshold
+Normal launch:
 
-Claude Code does not expose a portable project setting equivalent to “compact at
-65% of the context window.” Therefore:
+```bash
+python3 <skill-root>/scripts/run_worker.py \
+  --project-root <absolute-project-root> \
+  --run-root <absolute-run-root> \
+  --task-id <id> --role <role> --attempt <n> \
+  --prompt-file <absolute-attempt>/launch-prompt.txt \
+  --task-contract <absolute-task-root>/contracts/rNNNN.md \
+  --worker-rules <absolute-run-root>/worker-rules/rNNNN/WORKER_RULES.md \
+  --scope-baseline <absolute-attempt>/scope-baseline.json \
+  --report <absolute-report> \
+  --event-dir <absolute-attempt> \
+  --log <absolute-attempt>/worker.log \
+  --db <absolute-external-run-db> \
+  --detach
+```
 
-- when the current client exposes context usage, prepare at 65% and invoke
-  `/compact` at the next safe boundary;
-- otherwise maintain HANDOVER incrementally and rely on PreCompact to create the
-  checkpoint before native automatic compaction;
-- also use the periodic safe-boundary fallback from `COMPACTION.md`.
+`run_worker.py --detach` returns a tiny JSON launch result immediately. The Claude
+`PostToolUse:Bash` hook sees that result, starts a cheap background waiter for the
+exact DSD `terminal.json`, and otherwise exits immediately for ordinary Bash calls.
+When the external OpenCode worker reaches terminal process state, the waiter exits
+with Claude's documented `asyncRewake` signal and supplies only the terminal-event
+path/status as a system reminder. Claude can therefore remain idle while the worker
+runs; no model turn is spent polling it.
 
-## Hook behavior
+On re-wake:
 
-- `PreCompact`: prepares the checkpoint. If preparation fails, it blocks
-  compaction so the run is not compressed without durable continuity.
-- `PostCompact`: stores the native compact summary when available and marks the
-  run `rehydration-required`.
-- `SessionStart` matching `compact|resume`: injects the exact rehydration steps.
+1. read the named `terminal.json`;
+2. classify completed vs process/transport error and update `state.json` once;
+3. run the mechanical evidence gate **only for a successful completed exit**;
+4. otherwise enter suspect-change/recovery or availability handling as appropriate;
+5. route Clerk/review/repair/next action normally.
 
-After injection, Claude must reload the skill and live run files, run
-`verify-resume`, and immediately execute `next_action`.
+Do **not** read reports/logs, sample CPU, rewrite state, or narrate merely to prove
+liveness while the waiter is active.
 
-## Manual path
+### Fallback when hooks are unavailable
 
-Without hooks:
+Managed policy or local configuration may disable project hooks. In that case use
+the portable fallback: detached `run_worker.py` plus the longest safe blocking
+`wait_worker.py` invocation available in the current Claude Bash environment. A
+plain wait timeout is a **non-event**: do no repository/report inspection and
+immediately issue another long wait.
 
-1. run checkpoint preparation;
-2. use `/compact` with a short reminder to preserve the active DSD run path;
-3. reload the skill and checkpoint after compaction;
-4. verify continuity and continue.
+Claude background Bash tasks are also available, but their normal async output is
+only guaranteed to be delivered on a later conversation turn. DSD therefore
+prefers `asyncRewake` when project hooks are available because it explicitly wakes
+an idle Claude on the terminal event.
 
-## Official references
+Claude's `SubagentStart`/`SubagentStop` hooks remain relevant only for
+**Claude-native subagents** and are not the DSD external-worker lifecycle contract.
 
-- https://code.claude.com/docs/en/hooks
-- https://code.claude.com/docs/en/hooks-guide
+Official references:
+
+- hook lifecycle / `asyncRewake`: https://code.claude.com/docs/en/hooks
+- background Bash fallback: https://code.claude.com/docs/en/interactive-mode
+
+## Compaction / continuity hooks
+
+The same adapter installs `PreCompact`, `PostCompact`, and `SessionStart` hooks:
+
+- `PreCompact` prepares the immutable DSD checkpoint; failure blocks compaction;
+- `PostCompact` marks rehydration required and stores native summary when exposed;
+- `SessionStart` for compact/resume injects the exact rehydration instruction.
+
+When exact context use is exposed, prepare around 65% and compact at a safe boundary
+before ~75%. Otherwise rely on hooks + periodic safe-boundary fallback from
+`COMPACTION.md`.
+
+After compaction/restart, reload governing authority/skill/run files as required,
+run `verify-resume`, then execute persisted `next_action`.
