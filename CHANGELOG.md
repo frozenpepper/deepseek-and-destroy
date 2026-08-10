@@ -1,5 +1,26 @@
 # Changelog
-## Unreleased
+
+## v13 — Premium-context economy and external-worker event control
+
+- Reassert the real default topology: premium orchestrator -> external OpenCode CLI -> `opencode-go/deepseek-v4-flash`; native subagent hooks are not assumed to observe that worker.
+- Add `orchestrator/CONTROL.md` with mandatory authority reading, handover trust boundary, event-driven narration, three-deep-read ceiling, and two-zero-change decomposition guard.
+- Replace hand-authored multi-kilobyte worker prompts with immutable versioned `worker-rules/rNNNN/` snapshots (including canonical `worker/ROLES.md` role contracts), small immutable numbered task-contract revisions, `render_task_contract.py`, and `render_worker_prompt.py`.
+- Add `run_worker.py` and `wait_worker.py`: one wrapper owns OpenCode process/DB/log/session bookkeeping and emits a durable terminal event; harnesses wait natively or through one long blocking helper rather than model-level polling.
+- Claude adapter now uses a project `PostToolUse:Bash` `asyncRewake` hook to wait on the detached OpenCode wrapper terminal event and wake idle Claude; Codex/OpenCode use foreground or long blocking event waits. CPU/log polling is recovery-only.
+- Add a conditional Evidence Clerk role plus `evidence_gate.py` for report skeleton/misplacement, verification arithmetic, provenance/tripwire reconciliation, and cheap log/progress/handover maintenance; read-only source movement and mutating changes outside declared write scope are hard recovery failures, never clerical reconciliation.
+- Tighten worker behavior: current contract-bound mechanical helper facts are given facts; stale helper artifacts are not authority; ordinary repository mismatch is resolved from authority rather than returned as a scope-choice menu.
+- Add full Git-worktree per-attempt scope baselines and exact `Allowed source changes` for mutating roles, with symlink-safe hashing and hard scope-drift enforcement.
+- Add atomic attempt reservations so the same numbered attempt/report/log cannot be launched twice, and prohibit task-owned background writers after FINAL.
+- Bind each attempt cryptographically to its exact launch prompt, task-contract revision, worker-rules revision + manifest/protocol snapshot, and scope baseline; the evidence gate rejects post-launch mutation of any bound authority/evidence artifact.
+- Bind accepted Evidence Clerk overlays to the exact Clerk report SHA-256 so a later same-path edit cannot inherit an older CLEAN gate.
+- Keep the semantic task contract role-neutral: role-specific report paths live in immutable launch handoffs, avoiding contradictory Implementer/Reviewer deliverables.
+- Make terminal worker/review evidence immutable; later repairs/reviews use new numbered attempts.
+- Add an explicit phase write barrier: artifact-mutating verification is a writer and finishes before closure; post-barrier verification/audit is read-only, and any later mutation reopens/invalidates the gate snapshot.
+- Make routine parent narration mechanically bounded: silent by default; host-forced routine update is one sentence (~25 words).
+- Demote optional contributed adapters from core workflow assumptions; they load only when explicitly selected.
+- Incorporate selected Lunacy lessons (path-only handoffs, quiescent waits, compact control packets, immutable evidence, three-deep-read ceiling, write barrier) without copying Codex-native worker semantics or parent repository review.
+
+## v12 — Worker proof contracts
 
 ### Worker proof-contract revision
 
