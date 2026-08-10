@@ -192,3 +192,13 @@ Hooks must not guess among multiple active runs. Prefer, in order:
 
 If several candidates remain, block checkpoint mutation and require an explicit
 run root. Ambiguity is safer than corrupting another orchestrator's run.
+
+
+## Resume trust boundary
+
+Compaction does not promote handover prose into technical authority. `HANDOVER.md`
+restores continuity, but technical claims remain inherited assertions. Before the
+orchestrator repeats/escalates/builds a new plan-wide decision on such a claim,
+follow its cited governing/accepted evidence or route the predicate to a worker.
+State/run identity and helper-produced mechanical facts retain their normal
+control-plane authority after `verify-resume`.
