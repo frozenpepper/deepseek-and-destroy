@@ -1,356 +1,288 @@
 # DeepSeek and Destroy
 
-> **Feed it a plan. It keeps spawning, reviewing, fixing, proving, and moving
-> forward until the plan is actually done.**
+> **Give an expert orchestrator a plan. Cheap DeepSeek workers do the repository
+> work until the plan is actually finished.**
 
-DeepSeek and Destroy (DSD) is a portable coding-agent skill for executing large,
-multi-phase implementation plans while keeping expensive orchestrator context for
-plan-wide judgment instead of repository-scale grunt work.
+DSD is a long-horizon coding orchestration skill built around one economic rule:
 
-The main orchestrator:
+> **Spend premium context on authority and judgment, not repository ingestion,
+> prompt boilerplate, worker polling, arithmetic, or progress narration.**
 
-- understands the authoritative plan and project architecture;
-- decomposes phases into independently reviewable units;
-- routes workers and resolves genuine plan-wide decisions;
-- accepts credible independently reviewed work;
-- owns phase gates and human escalation.
+The default worker is `opencode-go/deepseek-v4-flash` launched through the OpenCode
+CLI as an external process. The premium orchestrator may run in Claude Code, Codex,
+OpenCode, or another capable harness.
 
-Cheap workers:
-
-- survey current state;
-- discover unfamiliar subsystems;
-- implement bounded changes;
-- run expensive verification;
-- independently review;
-- repair findings;
-- recover reportless/partial work;
-- synthesize phase evidence.
-
-The rule is:
-
-> **Workers execute and establish technical facts. The orchestrator routes,
-> decides, and approves.**
-
-## The loop
+## Architecture
 
 ```text
-plan
-  │
-  ▼
-Phase Survey / Discovery when needed
-  │
-  ▼
-bounded task + AC IDs + Proof Obligations
-  │
-  ▼
-Fresh IMPLEMENTER
-  │
-  ▼
-Fresh REVIEWER
-  │
-  ├── PASS + complete proof contract ──► accept task
-  │
-  └── FAIL ──► fixer ──► fresh reviewer
-
-all phase tasks accepted
-  │
-  ▼
-Verification Workers + fresh Phase Auditor
-  │
-  ▼
-main-orchestrator phase gate
-  │
-  ├── findings ──► remediation worker loops
-  └── clean ─────► next phase
+                 premium orchestrator
+              (Claude / Codex / OpenCode)
+                         │
+          authority + decomposition + decisions
+                         │
+              tiny path-only task handoff
+                         │
+                         ▼
+              OpenCode CLI + DeepSeek worker
+                         │
+      inspect / implement / test / review / repair
+                         │
+                         ▼
+                  durable report/evidence
+                         │
+              mechanical evidence gate
+                         │
+            ┌────────────┴─────────────┐
+            │                          │
+          clean                  discrepancy/clerical
+            │                          │
+            │                    Evidence Clerk
+            │                    (cheap worker)
+            └────────────┬─────────────┘
+                         ▼
+                 compact Decision Packet
+                         │
+                         ▼
+                    orchestrator
+                 route / decide / approve
 ```
 
-It continues automatically until the complete plan is done, a real human blocker
-is reached, the user pauses it, or the user abandons it.
+## What v13 changes
 
-A task finishing is not a reason to stop. A phase finishing is not a reason to
-stop. A review failure is normal workflow. A context window ending is not project
-completion.
+### No hand-written worker dossiers
 
-## Why the worker proof layer exists
+Stable worker/project/harness rules are snapshotted into immutable versioned
+`worker-rules/rNNNN/` revisions with a manifest binding the rules and protocol files. Each task uses a small immutable numbered contract
+revision containing the changing unit, objective, <=3 sharp risk hypotheses,
+acceptance/proof contract, task-output/evidence expectations, and exact `Allowed
+source changes` for mutating roles. The role-specific report path is assigned by the immutable launch handoff so one semantic contract can be shared by Implementer, Reviewer, and Fixer.
 
-Long field runs exposed a nasty class of failure: a test can be green for the
-**wrong reason**.
+`scripts/render_task_contract.py` renders/freezes the fixed contract frame from compact slots. `scripts/render_worker_prompt.py` renders a tiny path-only launch prompt. If the
+orchestrator is repeatedly writing 2–4 KB prompts, the flow is wrong.
 
-Examples include:
+### External worker waiting is event-driven
 
-- a negative test aborting before the production guard it claims to test;
-- a single-member fixture hiding a multi-member "last parent wins" bug;
-- a fail-closed approval gate whose approval is copied from the object being gated;
-- aggregate counts hiding incorrect per-entity identity;
-- same-instance continuation being mistaken for durable restart behavior.
+The default worker is an external `opencode run` process, not a Claude/Codex native
+subagent. `scripts/run_worker.py` wraps that process and writes a durable
+`terminal.json` when the actual child exits.
 
-DSD therefore gives workers a compact proof discipline in `worker/`.
+The premium harness then uses its best native wait:
 
-The central rule is:
+- **Claude Code:** launch the wrapper detached; a project `asyncRewake` hook waits
+  cheaply on its terminal event and wakes idle Claude only when the worker exits;
+- **Codex:** foreground wrapper when safe, otherwise one long blocking
+  `wait_worker.py` call;
+- **OpenCode/other:** foreground or detached wrapper + long blocking wait.
 
-> **An expected outcome is not proof. Establish why the outcome occurred and that
-> the production mechanism named by the acceptance criterion was actually reached.**
+No routine CPU/log polling. A plain wait timeout is a non-event: wait again without
+reading the repository or narrating “still running.”
 
-Non-trivial tasks use stable acceptance IDs (`AC-001`, etc.) and compact **Proof
-Obligations**. Implementer and reviewer receive the same obligations.
+### Evidence gate before premium judgment
 
-Reviewer reports contain a **Proof Matrix** with one row per AC:
+Worker reports are claims until cheap mechanical checks are clean.
 
-```markdown
-| AC | Mechanism reached | Positive | Negative | Dimensions exercised | Counterexample defeated | Result |
-|---|---|---|---|---|---|---|
-| AC-001 | YES: validator reached | PASS | PASS | multi-member | YES | PASS |
-```
+`evidence_gate.py` catches:
 
-For risky criteria the reviewer asks:
+- missing/misplaced/non-final report skeletons;
+- inconsistent verification arithmetic when counts are declared;
+- malformed reviewer Proof Matrix/fast-path contract;
+- any read-only source movement;
+- mutating changes outside the task's exact `Allowed source changes`;
+- task/report requests for provenance/tripwire reconciliation.
 
-> What plausible broken implementation could still make the current evidence look
-> green?
+Ambiguity goes to the **Evidence Clerk** (the normal cheap worker in a read-only
+project role), not to the premium orchestrator. The clerk can re-derive tripwire
+numbers, check provenance against the real task-start baseline, recover misplaced
+reports from logs, and maintain technical logs/progress/handover when assigned.
 
-If the evidence would not catch that counterexample, the criterion is not proven.
+### Authority reading is mandatory
 
-## Small proof recipes, not giant checklists
+“Orchestrator does not investigate” no longer means “orchestrator skips the plan.”
+At a new run or fresh parent session, the orchestrator personally reads current
+user instructions, project instructions (`AGENTS.md` or equivalent), the
+authoritative plan, and relevant architecture/contracts.
 
-`worker/PROOF-PATTERNS.md` currently defines five optional recipes:
+Repository-scale tracing/testing stays worker-side.
 
-- **NEGATIVE-GATE** — realistic allowed + rejected paths and independent authority;
-- **CARDINALITY** — exercise `>1` members and assert individual mappings;
-- **IDENTITY** — structural relationships derive from canonical identity;
-- **DURABILITY** — cross the real restart/persistence boundary;
-- **DERIVED-EVIDENCE** — distinct green claims require their actual contractual
-  predicates.
+`HANDOVER.md` restores continuity but its technical claims are prior-session
+assertions, not authority. Claims used for a new decision must point to governing or
+accepted evidence.
 
-Discovery/Survey workers recommend only the patterns that actually apply. The
-orchestrator forwards those durable recommendations rather than hand-authoring an
-expensive review theory.
+### Hard economy rules
 
-## Fast-path acceptance without paying twice
+- routine user transitions are silent; if the host forces an update, one sentence,
+  target <=25 words;
+- parent normally reads Decision Packets only;
+- >3 substantive deep slices for one parent decision triggers worker compression or
+  a fresh parent context;
+- technical major-findings prose is written by evidence-owning workers or the
+  Evidence Clerk, not the premium parent;
+- two consecutive zero-intended-change mutating attempts forbid a third attempt on
+  the same contract until it is split/re-prescribed;
+- terminal reports/evidence are immutable; repairs create new numbered attempts;
+- every terminal worker attempt gets a full Git-worktree baseline; mutating roles
+  may change only declared `Allowed source changes`, read-only roles none;
+- phase audit/gating uses a write barrier so nobody audits a moving tree.
 
-A credible fresh reviewer PASS is meant to save premium-model work.
+## Correctness model
 
-The task fast path requires:
+DSD v12 introduced explicit worker proof discipline and v13 keeps it:
 
-```text
-fresh independent reviewer PASS
-+ complete Decision Packet
-+ Proof Matrix covers every AC and all rows PASS
-+ TASK-RELEVANT DEFECTS: NONE
-+ required verification PASS
-+ scope/preservation clean
-+ no conflicting evidence
-+ structural review-contract check PASS
-= accept and continue
-```
+> **An expected outcome is not proof. Show that the intended production mechanism
+> was reached and caused the result.**
 
-The orchestrator does **not** then reread the code, rerun tests, or repeat the
-review. If something is doubtful, it sends the exact question to another fresh
-worker.
+Meaningful behavioral acceptance criteria use stable `AC-*` ids and Proof
+Obligations. Reviewer reports contain a Proof Matrix. For risky criteria, reviewers
+attack sharp falsifiable counterexamples rather than merely “reviewing carefully.”
 
-`scripts/check_review_contract.py` checks structural completeness and internal
-consistency. It does not pretend to judge software semantics.
+Small proof recipes cover common failure classes without turning the worker prompt
+into a universal checklist:
 
-## Defect honesty
+- `NEGATIVE-GATE`
+- `CARDINALITY`
+- `IDENTITY`
+- `DURABILITY`
+- `DERIVED-EVIDENCE`
 
-A correctness defect affecting a required acceptance dimension cannot be relabeled
-as a "known limitation", technical debt, cleanup, or future work to preserve PASS.
-It is a task failure.
+A required-dimension defect is FAIL, not a “known limitation.”
 
-Intentional downstream contract consequences may be scheduled as concrete closure
-tasks, but the containing phase remains blocked until maintained consequence suites
-are restored.
+## Default OpenCode storage
 
-When a prerequisite is reopened, dependent tasks become `needs-revalidation`.
-They are either confirmed `still-valid` or marked `superseded` and replaced; stale
-contracts are not allowed to continue silently.
+DSD uses one disposable OpenCode DB **per run**, outside every repository/worktree.
+This avoids polluting the user's normal OpenCode history and avoids OpenCode
+project-refresh scanning its own actively-written SQLite file.
 
-## Worker instructions
-
-The worker protocol is intentionally small:
-
-```text
-worker/
-├── SKILL.md             # proof/evidence kernel
-├── BUILD.md             # implementer/fixer discipline
-├── REVIEW.md            # reviewer/verifier/auditor discipline
-└── PROOF-PATTERNS.md    # optional proof recipes
-```
-
-Every worker gets:
-
-1. Common Rules from `PROMPTS.md`;
-2. Worker Core;
-3. the applicable Build/Review role protocol;
-4. only relevant proof-pattern excerpts;
-5. exact bounded task paths, ACs, Proof Obligations, verification and report paths.
-
-This is prompt assembly, not a new premium-orchestrator investigation job.
-
-## Task sizing and discovery
-
-The strongest field predictor of worker failure has been **too many independently
-reviewable units in one worker context**.
-
-Default to one unit per task. One behavioral change plus directly coupled tests can
-be one unit. Separately reviewable wiring, generated clients, fixture migrations,
-artifact audits, browser batteries, and full-suite runs are usually separate.
-
-For unfamiliar subsystems, Discovery first produces a durable construction brief:
-
-- exact files/symbols/call paths;
-- construction boundaries and wiring;
-- exclusions;
-- first edit/checkpoint;
-- acceptance/verification;
-- Proof Obligations and recommended proof patterns.
-
-The implementer verifies local assumptions and starts writing instead of
-rediscovering already-settled architecture.
-
-## Durable state and crash recovery
-
-Each execution owns a run under:
-
-```text
-DeepSeekAndDestroy/plans/<plan-id>/runs/<run-id>/
-```
-
-The run keeps:
-
-- plan reference + immutable plan snapshots;
-- `state.json` with exact `next_action`;
-- compact `HANDOVER.md`;
-- authority index;
-- task reports/verdicts;
-- Proof Matrices;
-- phase audits/remediation plans;
-- major findings/fixes log;
-- context checkpoints.
-
-`state.json` must describe reality before every worker launch. HANDOVER stays
-compact and is updated whenever resume semantics materially change.
-
-A reportless/dead worker leaves a **suspect tree**, not an assumption of no changes.
-DSD captures content evidence and sends non-obvious recovery to a fresh Recovery
-Auditor before retrying.
-
-## OpenCode worker storage
-
-Default workers use OpenCode CLI with:
-
-```text
-opencode-go/deepseek-v4-flash
-```
-
-OpenCode workers use **one disposable external SQLite DB per DSD run**, never a DB
-inside the project/worktree and never the user's normal interactive DB.
-
-This provides:
-
-- clean user history;
-- reviewer/fixer session resume;
-- no project-copy self-scan of an actively-written DB;
-- simple terminal cleanup.
-
-Default sequential execution uses one run DB. Explicit parallel execution uses one
-external DB per concurrency lane.
-
-OpenCode PID files contain raw digits only. DSD reconciles an ambiguous possibly-live
-worker before relaunch; duplicate workers on one task are an incident.
+All worker sessions in a sequential run share that external DB. Reviewer → fixer
+resume uses the recorded session id when trustworthy. Terminal cleanup deletes the
+whole disposable DB.
 
 See `OPENCODE.md`.
 
-## Kilo Code
+## Run tree
 
-Kilo Code is supported through native subagents. DSD installs two worker profiles:
+```text
+DeepSeekAndDestroy/plans/<plan-id>/runs/<run-id>/
+  state.json
+  HANDOVER.md
+  worker-rules/
+    r0001/
+      WORKER_RULES.md
+      MANIFEST.json
+      protocol/
+  authority-index.json
+  major-findings-and-fixes.md
+  plan/
+  compactions/
+  phases/
+    <phase>/
+      <task>/
+        contracts/
+          r0001.md
+        attempts/
+          reviewer-1/
+            launch-prompt.txt
+            launch-reservation.json
+            attempt.json
+            scope-baseline.json
+            worker.log
+            terminal.json
+            evidence-gate.json
+        implementer-report-1.md
+        review-1.md
+```
 
-- `dsd-mutating-worker` — implementer/fixer;
-- `dsd-readonly-worker` — survey/discovery/verification/review/audit roles.
+## Worker flow
 
-The role-specific DSD prompt still carries the Worker Core and relevant proof
-protocol. See `KILOCODE.md` and `scripts/install_kilo_agents.py`.
+```text
+Survey/Discovery when needed
+        ↓
+independently reviewable task contract
+        ↓
+Implementer
+        ↓
+terminal event → evidence gate
+        ↓
+fresh Reviewer + sharp hypotheses
+        ↓
+terminal event → evidence gate / Clerk if needed
+       ↙ ↘
+    PASS  FAIL
+      │     │
+   accept  Fixer
+             │
+          fresh review
+```
 
-## Context checkpoints
-
-Long orchestrator sessions do not trust native compaction summaries as the sole
-continuity mechanism.
-
-Default policy:
-
-- checkpoint due at 65% when measurable;
-- compact at next safe boundary, normally before 75%;
-- no new substantial phase-level reasoning at 80%;
-- fallback safe-boundary checkpointing when percentage is unavailable.
-
-After compaction/session replacement, DSD rehydrates the skill, state, handover,
-checkpoint and plan identity, validates live workers, runs `verify-resume`, and
-continues the exact stored next action.
+At the phase boundary, all implementation/fix writers **and any verification that
+mutates accepted project artifacts** finish first. Then the write barrier closes,
+post-barrier verification/audit is read-only, a fresh Phase Auditor synthesizes
+proof, and the premium parent makes the plan-wide phase decision. Repairs reopen
+the barrier and invalidate the old gate snapshot.
 
 ## Install
 
-Copy the complete repository folder into the skill location used by your harness.
-Keep the folder intact:
+Clone/copy this directory into the skill location used by your orchestrator. For
+example:
 
-```text
-deepseek-and-destroy/
-├── SKILL.md
-├── README.md
-├── WORKSPACE.md
-├── PROMPTS.md
-├── HARNESS.md
-├── COMPACTION.md
-├── CODEX.md
-├── CLAUDE.md
-├── OPENCODE.md
-├── KILOCODE.md
-├── CONFIG.example.md
-├── LICENSE
-├── worker/
-│   ├── SKILL.md
-│   ├── BUILD.md
-│   ├── REVIEW.md
-│   └── PROOF-PATTERNS.md
-├── adapters/
-└── scripts/
-    ├── check_state.py
-    ├── check_review_contract.py
-    ├── context_checkpoint.py
-    ├── decision_packet.py
-    ├── detect_harness.py
-    ├── install_compaction_adapter.py
-    ├── install_kilo_agents.py
-    ├── opencode_probe.py
-    └── scope_snapshot.py
+```bash
+git clone https://github.com/frozenpepper/deepseek-and-destroy.git \
+  ~/.agents/skills/deepseek-and-destroy
 ```
 
-## Quick start
+The exact skill directory is harness-specific.
 
-```text
-Use DeepSeek and Destroy to execute the authoritative plan at
-DOCS/Plans/implementation-plan.md.
+OpenCode must already be configured with the default DeepSeek provider/model, or
+configure another worker profile explicitly.
 
-Continue autonomously until the complete plan is finished or a genuine
-human-level blocker is reached. Complete all non-live work before any final
-live-test gate.
+## Start a run
+
+Tell the orchestrator to use DSD against an authoritative plan. During intake it
+will resolve the project authority and create the durable run tree.
+
+The run-level worker rules/protocol snapshot can be created mechanically:
+
+```bash
+python3 <skill-root>/scripts/prepare_worker_rules.py \
+  --project-root <project> \
+  --run-root <run-root> \
+  --plan <authoritative-plan> \
+  --project-instruction <project>/AGENTS.md
 ```
 
-That is enough when defaults fit.
+## Important files
 
-## Optional configuration
+```text
+SKILL.md                         core mission/flow/authority boundary
+orchestrator/CONTROL.md          premium-token economy, trust, wait, gate rules
+WORKSPACE.md                     durable state/evidence/continuity
+PROMPTS.md                       task contract + path-only handoff format
+worker/SKILL.md                  Worker Core
+worker/ROLES.md                  role-specific authority/boundaries
+worker/BUILD.md                  implementation/fix doctrine
+worker/REVIEW.md                 review/verification/audit doctrine
+worker/EVIDENCE.md               Evidence Clerk doctrine
+worker/PROOF-PATTERNS.md         compact proof recipes
+HARNESS.md                       orchestrator vs worker harness selection
+OPENCODE.md                      default worker transport/storage
+CLAUDE.md                        Claude wait + compaction adapter
+CODEX.md                         Codex wait + compaction adapter
+COMPACTION.md                    durable context checkpoint protocol
+scripts/prepare_worker_rules.py  immutable versioned run worker-rules snapshot
+scripts/_rules_snapshot.py        shared worker-rules manifest integrity checks
+scripts/render_task_contract.py   fixed contract renderer
+scripts/render_worker_prompt.py  tiny launch prompt
+scripts/run_worker.py            OpenCode process wrapper + terminal event
+scripts/wait_worker.py           long blocking portable wait
+scripts/evidence_gate.py         pre-acceptance mechanical gate
+scripts/check_review_contract.py reviewer proof contract checker
+scripts/check_state.py           control-plane invariant checker
+scripts/scope_snapshot.py        mechanical content-hash facts
+```
 
-Use `CONFIG.example.md` to override only what you need:
-
-- worker harness/model/endpoint;
-- role routing and fallback workers;
-- review/transport budgets;
-- project-specific rules and domain lenses;
-- live/destructive test policy;
-- context checkpoint behavior.
-
-The main orchestrator is never an implicit fallback worker.
+Optional contributed integrations may also exist in the repository. They are
+inactive unless explicitly selected and are intentionally not part of the default
+DSD read/routing path.
 
 ## License
 
-MIT. Use it, modify it, fork it, improve it, redistribute it, sell things built on
-it, or strap it to whatever agent harness you enjoy. See `LICENSE`.
-
-Copyright (c) 2026 FrozenPepper.
+MIT. See `LICENSE`.
