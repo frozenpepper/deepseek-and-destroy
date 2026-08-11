@@ -208,7 +208,7 @@ def prepare(
 
     summary = current_task_summary(state)
     manifest: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "sequence": sequence,
         "created_at": utc_now(),
         "reason": reason,
@@ -227,6 +227,11 @@ def prepare(
         "plan_reference_sha256": sha256(plan_reference),
         "authority_index_sha256": sha256(authority_index),
         "effective_config_sha256": sha256(effective_config),
+        "authority_paths": {
+            "plan_reference": str(plan_reference),
+            "authority_index": str(authority_index),
+            "effective_config": str(effective_config),
+        },
         "active_summary": summary,
     }
     write_json(manifest_path, manifest)
@@ -269,8 +274,8 @@ Immutable snapshots captured with this checkpoint:
 ## Resume contract
 
 The compacted conversation is not authoritative. Reload the skill, read the live
-handover and state, compare the plan/config/authority hashes, revalidate any live
-worker, then run:
+handover and state, then run the mechanical continuity verifier before revalidating
+any live worker:
 
 ```bash
 python3 "{project_root / 'DeepSeekAndDestroy/tools/context_checkpoint.py'}" verify-resume \\
@@ -334,10 +339,9 @@ Before any project work:
 2. Read `{run_root / 'HANDOVER.md'}`.
 3. Read `{run_root / 'state.json'}`.
 4. Read `{checkpoint_md}` and `{manifest_path}`.
-5. Compare the live plan/config/authority hashes recorded by the run.
+5. Run `python3 "{project_root / 'DeepSeekAndDestroy/tools/context_checkpoint.py'}" --run-root "{run_root}" verify-resume --sequence {sequence}`; it mechanically checks governing plan/config/authority continuity.
 6. Revalidate any worker recorded as live; do not trust pre-compaction PID/liveness blindly.
-7. Run `python3 "{project_root / 'DeepSeekAndDestroy/tools/context_checkpoint.py'}" --run-root "{run_root}" verify-resume --sequence {sequence}`.
-8. Execute the live `state.json` `next_action` immediately.
+7. Execute the live `state.json` `next_action` immediately.
 
 The native compacted summary is advisory only. The external checkpoint and live run files are authoritative.
 """
@@ -353,25 +357,74 @@ def verify_resume(project_root: Path, run_root_arg: str | None, sequence_arg: in
         raise RuntimeError("Run identity differs from checkpoint manifest")
     if state.get("plan_id") != manifest.get("plan_id"):
         raise RuntimeError("Plan identity differs from checkpoint manifest")
-    checkpoint = state.setdefault("context_checkpoint", {})
-    checkpoint.update(
-        {
+
+    drift: list[str] = []
+    recorded_plan_source = manifest.get("plan_source_sha256")
+    if recorded_plan_source and state.get("plan_source_sha256") != recorded_plan_source:
+        drift.append("plan source identity/hash recorded in state changed")
+
+    authority_paths = manifest.get("authority_paths") if isinstance(manifest.get("authority_paths"), dict) else {}
+    defaults = {
+        "plan_reference": run_root / "plan/plan-reference.md",
+        "authority_index": run_root / "authority-index.json",
+        "effective_config": run_root / "effective-configuration.md",
+    }
+    state_keys = {
+        "plan_reference": "plan_reference",
+        "authority_index": "authority_index",
+        "effective_config": "effective_config",
+    }
+    hash_keys = {
+        "plan_reference": "plan_reference_sha256",
+        "authority_index": "authority_index_sha256",
+        "effective_config": "effective_config_sha256",
+    }
+    checked: dict[str, dict[str, Any]] = {}
+    for name in ("plan_reference", "authority_index", "effective_config"):
+        live = resolve_path(state.get(state_keys[name]), project_root) or defaults[name]
+        recorded_path = authority_paths.get(name)
+        if recorded_path and Path(recorded_path).resolve() != live.resolve():
+            drift.append(f"{name} path changed: checkpoint={recorded_path} live={live}")
+        expected = manifest.get(hash_keys[name])
+        actual = sha256(live)
+        checked[name] = {"path": str(live), "expected_sha256": expected, "actual_sha256": actual}
+        if expected != actual:
+            drift.append(f"{name} content changed or is missing")
+
+    if drift:
+        checkpoint = state.setdefault("context_checkpoint", {})
+        checkpoint.update({
             "sequence": sequence,
-            "status": "resumed",
-            "resumed_at": utc_now(),
-            "continuity_verified": True,
-            "resumed_harness": harness,
+            "status": "rehydration-required",
+            "continuity_verified": False,
+            "continuity_error_at": utc_now(),
+            "continuity_drift": drift,
             "checkpoint_path": str(checkpoint_md),
             "manifest_path": str(manifest_path),
-        }
-    )
+        })
+        write_json(run_root / "state.json", state)
+        raise RuntimeError("Governing authority drift after checkpoint: " + "; ".join(drift))
+
+    checkpoint = state.setdefault("context_checkpoint", {})
+    checkpoint.update({
+        "sequence": sequence,
+        "status": "resumed",
+        "resumed_at": utc_now(),
+        "continuity_verified": True,
+        "resumed_harness": harness,
+        "checkpoint_path": str(checkpoint_md),
+        "manifest_path": str(manifest_path),
+        "authority_verified": checked,
+    })
     write_json(run_root / "state.json", state)
     return {
         "run_root": str(run_root),
         "sequence": sequence,
         "status": "resumed",
+        "continuity_verified": True,
+        "authority_verified": checked,
         "next_action": state.get("next_action"),
-        "note": "Revalidate active worker state separately before acting on it.",
+        "note": "Revalidate any active worker lifecycle separately before acting on it.",
     }
 
 

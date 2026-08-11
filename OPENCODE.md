@@ -1,28 +1,26 @@
-# DeepSeek and Destroy — OpenCode Adapter
+# DeepSeek and Destroy — OpenCode CLI Worker Adapter
 
-Read this when either the orchestrator or effective worker harness is OpenCode.
-It defines DSD worker storage, launch/resume, liveness, provider recovery, and the
-OpenCode orchestrator compaction adapter.
+This is the **default DSD worker transport** regardless of whether the premium
+orchestrator runs in Claude Code, Codex, OpenCode, Kilo Code, or another harness.
 
-## Worker storage: one external database per DSD run
+Default worker:
 
-OpenCode writes sessions to SQLite. DSD must not pollute the user's normal
-interactive OpenCode database, and an actively-written worker DB must never live
-inside the project/worktree: OpenCode project-copy/project-refresh can scan project
-files while the worker is writing its DB, creating self-referential I/O failures
-that can look like provider/session failures.
+- harness: OpenCode CLI;
+- model: `opencode-go/deepseek-v4-flash`;
+- fresh external process per worker attempt;
+- one disposable external OpenCode DB per DSD run (one per concurrency lane only if
+  deliberate parallel OpenCode workers are enabled).
 
-> **Use one disposable OpenCode DB per DSD run, stored outside every project and
-> worktree path.**
+## Why the worker DB is external and run-scoped
 
-Default sequential execution shares that run DB across implementer/reviewer/fixer
-sessions. Resume uses the same DB plus the recorded session ID. Unrelated DSD runs
-never share one DB.
+Do not use the user's normal OpenCode database: DSD can create many sessions and
+should not pollute interactive history.
 
-### External run DB path
+Do not put a worker DB anywhere inside the repository/project/worktree. Field
+experience showed OpenCode project-copy/refresh can scan the project tree and hit
+its own actively-written SQLite file, producing self-referential I/O failures.
 
-`OPENCODE_DB` must be absolute. A configured `DSD_OPENCODE_STATE_ROOT` wins.
-Reasonable defaults:
+Use one disposable run DB outside every project/worktree, for example:
 
 ```bash
 if [ -n "${DSD_OPENCODE_STATE_ROOT:-}" ]; then
@@ -32,210 +30,191 @@ elif [ "$(uname -s)" = "Darwin" ]; then
 else
   DSD_OC_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/deepseek-and-destroy/opencode"
 fi
-
 DSD_OC_RUN_DIR="$DSD_OC_ROOT/<run-id>"
 mkdir -p "$DSD_OC_RUN_DIR"
 DSD_OC_RUN_DB="$DSD_OC_RUN_DIR/workers.db"
 ```
 
-On Windows use a user-local cache/state directory such as `%LOCALAPPDATA%`.
-Mandatory invariants:
+Persist the resolved absolute path in `state.json`. All attempts in the run may share
+the same external DB, but **normal role changes always start fresh worker sessions**.
+Session continuation is reserved for trustworthy same-role transport/recovery cases.
 
-- absolute path;
-- outside repository/project and every active worktree;
-- outside project-local `DeepSeekAndDestroy/`;
-- persisted in `state.json` for resume;
-- unique per unrelated run.
+If deliberate simultaneous OpenCode workers are enabled, use one external DB per
+concurrency lane and keep resumed sessions on their original lane.
 
-Compare resolved paths, not strings. Invalid project-contained paths are a launch
-blocker.
-
-### DB lifecycle
-
-1. Resolve/create run DB once on first OpenCode worker.
-2. Fresh worker uses `OPENCODE_DB="$DSD_OC_RUN_DB"`; record its session ID.
-3. Resume uses the same DB and exact session ID.
-4. Normally keep completed sessions until run end. If one will certainly never be
-   resumed, optional `opencode session delete <session-id>` may remove it from the
-   run DB.
-5. At terminal cleanup, after durable DSD evidence is preserved and no worker can
-   resume:
+At terminal run cleanup, after all durable DSD evidence is preserved and no session
+can resume:
 
 ```bash
 rm -f "$DSD_OC_RUN_DB" "$DSD_OC_RUN_DB-wal" "$DSD_OC_RUN_DB-shm"
 rmdir "$DSD_OC_RUN_DIR" 2>/dev/null || true
 ```
 
-Do not `VACUUM` or otherwise maintain the user's normal OpenCode DB as DSD cleanup.
+Do not delete the run DB after every task; later same-role continuation/recovery may need it.
 
-### Parallel workers
+## Path-only worker launch
 
-Default DSD is sequential. If configuration deliberately enables simultaneous
-OpenCode workers, use one **external DB per concurrency lane** and persist the lane
-association. Sessions resume on their original lane DB.
+The orchestrator does not hand-write the OpenCode command or a multi-kilobyte
+prompt.
 
-### Credentials and snapshots
+1. `prepare_worker_rules.py` creates an immutable run worker-rules revision such as
+   `worker-rules/r0001/WORKER_RULES.md` plus `MANIFEST.json` and that revision's `protocol/` snapshot.
+2. `contracts/rNNNN.md` is the immutable current task contract containing
+   unit/objective/risks/acceptance/proof/deliverable, exact role-input references,
+   and `Allowed source changes` for mutating roles.
+3. capture the full Git-worktree attempt baseline excluding only
+   `DeepSeekAndDestroy/`; this is later used by the evidence gate.
+4. `render_worker_prompt.py` writes the small `launch-prompt.txt` against one exact
+   worker-rules revision and task-contract revision.
+5. `run_worker.py` owns OpenCode process construction, DB env, title, cwd, log,
+   process identity, atomic attempt reservation, optional same-role continuation, report
+   skeleton, and terminal event.
 
-OpenCode auth/config remains in its normal location; no credential symlinks are
-required. Disposable workers may disable OpenCode project snapshots when compatible
-with the installed version. DSD content-hash scope/preservation evidence remains
-authoritative regardless.
-
-## Default worker profile
-
-- Harness: OpenCode CLI
-- Model: `opencode-go/deepseek-v4-flash`
-- Endpoint: existing OpenCode provider configuration
-- Storage: external run DB above
-- Default execution: sequential
-
-### Fresh launch
-
-Expose the actual `opencode` PID. With Bash, process substitution keeps `$!` on the
-OpenCode process rather than `tee`:
+Example foreground wrapper:
 
 ```bash
-DSD_OC_RUN_DB="<absolute-external-run-db-from-state>"
-LOG_PATH="<log-path>"
-OPENCODE_DB="$DSD_OC_RUN_DB" opencode run \
-  --model opencode-go/deepseek-v4-flash \
-  --auto \
-  --title "<task-id>-<role>-<round>" \
-  --dir "<project-root>" \
-  "<full-self-contained-prompt>" \
-  > >(tee "$LOG_PATH") 2>&1 &
-WORKER_PID=$!
-
-# Persist raw digits only. Do NOT write WORKER_PID=12345.
-printf '%s\n' "$WORKER_PID" > "<pid-path>"
+python3 <skill-root>/scripts/run_worker.py \
+  --project-root <project-root> \
+  --run-root <run-root> \
+  --task-id U4 --role reviewer --attempt 1 \
+  --prompt-file <task-root>/attempts/reviewer-1/launch-prompt.txt \
+  --task-contract <task-root>/contracts/rNNNN.md \
+  --worker-rules <run-root>/worker-rules/rNNNN/WORKER_RULES.md \
+  --scope-baseline <task-root>/attempts/reviewer-1/scope-baseline.json \
+  --report <task-root>/review-1.md \
+  --event-dir <task-root>/attempts/reviewer-1 \
+  --log <task-root>/attempts/reviewer-1/worker.log \
+  --db "$DSD_OC_RUN_DB" \
+  --model opencode-go/deepseek-v4-flash
 ```
 
-Immediately persist attempt number, raw PID, launch time, model/profile, session
-when known, report/log paths, and run DB path in state.
+The wrapper uses OpenCode's project `--dir`, deterministic title, the configured
+permission flag, and `OPENCODE_DB`. Before spawn it atomically creates `launch-reservation.json`, binding the exact
+launch-prompt, task-contract, worker-rules revision/manifest, and scope-baseline paths/hashes;
+reusing the same attempt/report/log is rejected. `launch-reservation.json` is the single immutable authority for that attempt.
+`attempt.json` and `terminal.json` are lifecycle records bound back to the exact
+reservation path/hash, so the evidence gate can reject post-launch authority or
+baseline tampering without maintaining duplicate copies of every binding. The
+wrapper writes `attempt.json` after the child exists and `terminal.json` when that
+exact child exits. Historical v14 terminal records remain readable.
 
-### PID integrity and duplicate-launch prevention
+OpenCode supports `opencode session list --format json`; after exit the wrapper
+best-effort resolves the deterministic title to a session id for possible same-role
+continuation/recovery. A missing or ambiguous session id does not corrupt task
+evidence; the normal next role starts fresh regardless.
 
-PID files contain **only decimal digits**. Before using a recovered PID, validate
-it rather than passing arbitrary file contents to `kill`:
+## Completion / waiting
+
+**Process exit is DSD's durable terminal event.** Under Worker Rules this is the
+no-more-task-writes boundary: workers must not leave background/daemon/watcher
+processes capable of mutating project source, generated deliverables, or terminal
+evidence after the worker process reaches terminal completion. Discovery of such a writer invalidates the assumption and enters recovery.
+
+How the premium orchestrator waits for that external process is harness-specific:
+
+- Claude: detached wrapper + `asyncRewake` terminal-event hook; see `CLAUDE.md`;
+- Codex: foreground wrapper when safe, otherwise detached wrapper + long blocking
+  `wait_worker.py`; see `CODEX.md`;
+- OpenCode/other orchestrator: foreground when safe or detached + long blocking
+  `wait_worker.py`.
+
+Detached example:
 
 ```bash
-PID_RAW=$(tr -d '[:space:]' < "<pid-path>" 2>/dev/null || true)
-case "$PID_RAW" in
-  ''|*[!0-9]*) echo "invalid PID record" >&2; exit 2 ;;
-esac
-WORKER_PID="$PID_RAW"
+python3 <skill-root>/scripts/run_worker.py ... --detach
+python3 <skill-root>/scripts/wait_worker.py --event-dir <attempt-dir>
 ```
 
-Do not treat an invalid/labeled PID record as proof the worker is dead. If process
-identity is uncertain, reconcile process/session identity plus CPU and durable
-log/report/checkpoint activity before relaunch.
+A wait timeout is not evidence of a hung worker. It is a non-event; wait again.
+When `terminal.json` appears, classify it before touching the report: successful
+completion enters the evidence gate; a non-zero process exit enters suspect-change
+recovery; a pre-start transport error enters availability handling.
 
-> **Never launch a second worker for the same task/role while the first may still
-> be alive.** A duplicate launch is an orchestration incident: reconcile the
-> original process, state, and suspect changes before any retry.
+### Why not poll CPU/logs normally?
 
-Do not use `pgrep -f "<task-title>"`; a watcher may match itself. Prefer the exact
-saved PID. If recovering without one, conservatively match a real `opencode run`
-command and reject ambiguous results.
+Redirected worker output can be buffered and CPU can legitimately be quiet. More
+importantly, every parent-side polling cycle spends premium orchestration attention
+for almost no value. `wait_worker.py` blocks cheaply inside one helper process.
 
-### Resume
+PID/CPU/log-growth inspection remains available only when a terminal/wait/tool
+signal is inconsistent and recovery needs to determine whether the process is
+still alive.
 
-```bash
-OPENCODE_DB="<absolute-external-run-db-from-state>" opencode run \
-  --model opencode-go/deepseek-v4-flash \
-  --auto \
-  --session "<session-id>" \
-  --dir "<project-root>" \
-  "<continuation-prompt>" 2>&1 | tee "<log-path>"
-```
+### OpenCode session events
 
-If a configured resume immediately reports missing session/process or equivalent
-transient launch failure, retry the exact resume once after a short delay with the
-same DB/session. If it fails again, use the configured fresh-fixer fallback rather
-than burning the full transport budget.
+Current OpenCode plugins expose `session.idle`, `session.error`, `session.status`,
+and related events; the official notification example treats `session.idle` as
+session completion:
 
-## Liveness and completion
+https://opencode.ai/docs/plugins/
 
-Redirected stdout may be block-buffered, so log-byte growth alone is invalid.
-Use multiple signals:
+DSD deliberately does **not** require another worker-event plugin in the normal
+path. The wrapper's actual process exit is simpler, portable across orchestrator
+harnesses, and stronger as a no-more-writes boundary. Reconsider only if empirical
+work shows a material benefit.
 
-- exact process existence;
-- accumulated CPU delta;
-- log/report/checkpoint growth;
-- expected changed-path activity when relevant;
-- elapsed time.
+## Report skeleton / wrong path protection
 
-Example sampler:
+Before launch, the wrapper creates the expected report only if absent and marks it:
 
-```bash
-sample_worker() {
-  kill -0 "$WORKER_PID" 2>/dev/null || return 3
-  CPU=$(ps -o time= -p "$WORKER_PID" | tr -d ' ')
-  OUT=$(wc -c < "$LOG_PATH" 2>/dev/null || printf 0)
-  NOW=$(date +%s)
-  printf '%s %s %s\n' "$NOW" "$CPU" "$OUT"
-}
-```
+`DSD_REPORT_STATUS: SKELETON`
 
-Interpret conservatively:
+Workers should replace the skeleton with substantive evidence and preferably mark
+`DSD_REPORT_STATUS: FINAL` at truthful completion. The process terminal event, not
+the magic word, is the durable no-more-writes boundary. A substantive report that
+merely omitted canonical finality is a clerical normalization case.
 
-- dead: process absent;
-- alive/slow: meaningful CPU or durable output/checkpoint progress;
-- probable wedge: substantial elapsed time plus repeated negligible CPU and
-  durable progress;
-- unknown: collect another window.
+If the canonical report is still the exact untouched launcher skeleton, however,
+the Evidence Clerk must actually recover one unambiguous complete same-attempt
+report from the exact log/declared output locations and canonicalize it
+byte-for-byte. A Clerk cannot waive an absent report by assertion; ambiguity stays
+MALFORMED.
 
-A report appearing is not completion. Wait for process exit or reliable harness
-completion before final scope hashes, missing-artifact claims, or verdict capture.
+## Same-role continuation
 
-Near a soft cap, prefer graceful completion. Use `SIGINT`, wait, then `SIGTERM` if
-needed; reserve `SIGKILL` for a runaway process. Forced/reportless exits enter the
-suspect-tree recovery protocol.
+A **role change always starts a fresh worker session**. Reviewer → Fixer, Fixer →
+Reviewer, Discovery → Implementer, and similar transitions carry context through
+durable reports/evidence, not inherited chat state. This keeps each role skill's
+reasoning prior clean and removes fuzzy "moderate versus heavy context" routing.
 
-## Provider health probe and recovery
+`run_worker.py --resume-session <id>` remains available only for trustworthy
+same-role transport/session continuation or recovery. It preserves all other
+transport invariants. If continuation cannot be established safely, start a fresh
+same-role attempt instead.
 
-After repeated banner-only/empty/provider-style failures, verify the exact model ID
-from `opencode models` and run the smallest `HEALTHCHECK OK` probe.
+## Provider health / recovery
 
-The probe DB must also be outside the project tree and should normally be a fresh
-temporary external DB separate from the run DB. This separates provider health
-from a corrupted/locked run DB. `scripts/opencode_probe.py` enforces the path rule.
+Before burning repeated task attempts after banner-only/empty/auth/provider errors:
 
-Do not infer credit/billing exhaustion solely from error text. Probe configured
-equivalent fallbacks. Transient incidents enter `WAITING-FOR-WORKER` with persisted
-backoff, next probe, and relaunch action.
+1. verify exact model id from `opencode models`;
+2. run `scripts/opencode_probe.py` with a fresh external temporary DB, not the run
+   DB;
+3. classify provider availability separately from task failure;
+4. persist backoff/relaunch/fallback state.
 
-## Worker protocol injection
+Do not infer exhausted billing from an error string alone.
 
-OpenCode workers receive the canonical role envelope from `PROMPTS.md`, compact
-Worker Core from `worker/SKILL.md`, the appropriate Build/Review protocol, and only
-task-relevant proof-pattern recipes. They do not need access to the skill folder at
-runtime when those sections have been assembled into the prompt.
+## Credentials / snapshots
 
-## Main-orchestrator context checkpoints
+Credentials stay in OpenCode's normal auth/config location and are separate from
+`OPENCODE_DB`.
 
-This section applies when the **main orchestrator** itself runs in OpenCode and is
-separate from worker run-DB storage.
+For disposable DSD workers, disable OpenCode internal project snapshots when the
+installed version supports it and project policy allows; DSD's content-hash scope
+facts remain authoritative. Never put a worker DB inside the project to gain
+persistence.
 
-Use `COMPACTION.md` and the project-local OpenCode compaction adapter:
+## OpenCode as the premium orchestrator
 
-```bash
-python3 <skill-root>/scripts/install_compaction_adapter.py \
-  --harness opencode \
-  --project-root <project-root>
-```
+When the premium orchestrator itself is OpenCode, the worker is still a separate
+OpenCode process/run DB. Use the same wrapper + long blocking wait semantics.
 
-The adapter creates the external DSD checkpoint before native compaction. Native
-summary is advisory. If `state.json.context_checkpoint.status` is `prepared`,
-`compacting`, or `rehydration-required`, reload skill/run identity and execute
-`verify-resume` before project work.
-
-Default checkpoint threshold is 65%; compact at the next safe boundary before the
-configured ceiling. When exact percentage is unavailable, use plugin/native hooks
-plus periodic safe-boundary checkpoints from `COMPACTION.md`.
+For orchestrator context compaction, install the existing project-local DSD
+pre-compaction plugin with `install_harness_adapter.py --harness opencode` and
+follow `COMPACTION.md`. The orchestrator compaction plugin and worker transport are
+separate concerns.
 
 Official references:
 
-- https://opencode.ai/v2/docs/compaction
-- https://opencode.ai/docs/plugins/
-- https://opencode.ai/docs/cli/#session
+- CLI: https://opencode.ai/docs/cli/
+- plugins/events: https://opencode.ai/docs/plugins/

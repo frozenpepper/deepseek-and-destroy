@@ -38,6 +38,20 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/DeepSeekAndDestroy/tools/claude_worker_rewake.py\"",
+            "statusMessage": "Watching DSD external worker",
+            "timeout": 604800,
+            "asyncRewake": true
+          }
+        ]
+      }
     ]
   }
 }

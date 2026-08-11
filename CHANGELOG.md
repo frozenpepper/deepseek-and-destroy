@@ -1,5 +1,70 @@
 # Changelog
-## Unreleased
+
+## v15.1 — Kilo restoration and orphan-surface audit
+
+- Restored Kilo Code as a first-class parent harness with top-level `KILO.md`,
+  explicit detection/installation, and canonical `.kilo/plugin/` compaction asset.
+- Promoted Kilo subagent templates to canonical `adapters/kilo/` assets and retained
+  old `contrib/kilo/` Python entry points only as compatibility wrappers.
+- Added `native_worker_attempt.py` so Kilo-native Task delegation reserves/finalizes
+  the same immutable launch/terminal authority and enters the ordinary scope/evidence
+  gate instead of bypassing the v15 lifecycle.
+- Corrected stale v15 configuration that still described Reviewer→Fixer session
+  resume and oversimplified Evidence Clerk write capability.
+- Made the harness installer consume checked-in canonical Codex/Claude/OpenCode/Kilo
+  adapter assets instead of synthesizing hidden duplicate plugin/hook bodies.
+- Centralized harness detection in `detect_harness.py`; the installer no longer owns
+  a second harness registry.
+- Fixed the old Kilo compaction path/module convention and complete helper-copy set;
+  hardened Kilo/OpenCode compaction plugins against resume-instruction failure.
+- Added Kilo/native lifecycle and orphan-regression acceptance coverage.
+
+## v15 — Semantic-worker tolerance and single-source control cleanup
+
+- Removed the duplicate premium-facing `orchestrator/CONTROL.md`; `SKILL.md` is now the single parent doctrine and role technique remains outside premium context.
+- Reduced generated `WORKER_RULES.md` to run facts/run-specific constraints; universal and specialist behavior live only in `COMMON.md` and the exact role mini-skill.
+- Relaxed terminal-report clerical coupling: launcher-owned Role/Task identity is no longer required from workers, `FAST-PATH ELIGIBLE` is derived by the evidence gate, and the Evidence Clerk uses one canonical verdict marker.
+- Kept semantic proof strict while making noncanonical report finality and equivalent per-AC review serialization Clerk-normalizable. A missing/untouched report skeleton, forbidden source movement, mutated immutable authority, or genuinely missing proof remains non-waivable.
+- Made ordinary role changes start fresh sessions; durable reports transfer context across Reviewer/Fixer/Implementer boundaries. `--resume-session` is limited to trustworthy same-role continuation/recovery.
+- Made `launch-reservation.json` the single immutable authority for new attempts. v15 `attempt.json`/`terminal.json` lifecycle records bind to its path/hash instead of duplicating all authority fields; historical v14 terminal evidence remains readable.
+- Simplified task contracts by omitting empty optional sections and launch-derived report/log/evidence boilerplate while retaining explicit `Allowed source changes`.
+- Made the Decision Packet extractor tolerate noncanonical reports with a bounded decision surface rather than forcing premium context to open the entire artifact.
+- Fixed compaction continuity semantics: checkpoints bind governing plan-reference, authority-index, effective-config, and plan-source hashes; `verify-resume` now checks them mechanically and fails closed on authority drift.
+- Centralized role capability sets (`contract-scoped writers`, `zero-change roles`, `phase-barrier writers`, `read-only roles`) in `scripts/_roles.py`.
+- Added role-skill integrity coverage so truncated/incomplete specialist doctrine is detected; corrected terminal-status guidance for Discovery, Phase Surveyor, and Verification.
+- Simplified harness/wait doctrine while preserving event-driven quiescent waiting, Evidence Clerk offload, exact scope tripwires, reportless Recovery, two-zero-change guard, phase write barrier, and fresh independent review.
+
+## v14 — Specialist role skills and a cleaner premium control plane
+
+- Split worker behavior into one universal `worker/COMMON.md` plus nine focused `worker/roles/dsd-<role>/SKILL.md` files for Implementer, Fixer, Reviewer, Verification, Discovery, Phase Surveyor, Recovery, Phase Auditor, and Evidence Clerk.
+- Keep those role files Agent-Skill-compatible for standalone evaluation while production DSD selects the exact role explicitly; native harness skill discovery/activation is never part of the correctness contract.
+- Snapshot every role skill immutably into each run-level worker-rules revision and bind nested role-skill hashes in `MANIFEST.json` (`dsd-worker-rules-manifest-v2`).
+- Simplify worker launch authority to `WORKER_RULES.md` + `COMMON.md` + the exact role `SKILL.md` + immutable task contract + proof patterns. Remove the old `ROLES.md` / `BUILD.md` / `REVIEW.md` / `EVIDENCE.md` role-family layering.
+- Add `scripts/_roles.py` as the single mechanical registry for role names, terminal vocabularies, role-skill paths, and mutation classification, eliminating duplicated launcher/gate registries without merging semantic roles.
+- Slim the premium-facing `SKILL.md` around orchestration decisions and routing; worker-job technique stays in the role mini-skills instead of consuming premium context.
+- Preserve the v13 architecture that matters: external OpenCode workers, immutable contracts/evidence, Evidence Clerk token offload, fresh review after mutation, exact write scopes, quiescent waiting, two-zero-change guard, and phase write barrier. No rigid JSON worker-response protocol or new supervisor subsystem is introduced.
+
+## v13 — Premium-context economy and external-worker event control
+
+- Reassert the real default topology: premium orchestrator -> external OpenCode CLI -> `opencode-go/deepseek-v4-flash`; native subagent hooks are not assumed to observe that worker.
+- Add `orchestrator/CONTROL.md` with mandatory authority reading, handover trust boundary, event-driven narration, three-deep-read ceiling, and two-zero-change decomposition guard.
+- Replace hand-authored multi-kilobyte worker prompts with immutable versioned `worker-rules/rNNNN/` snapshots (including canonical `worker/ROLES.md` role contracts), small immutable numbered task-contract revisions, `render_task_contract.py`, and `render_worker_prompt.py`.
+- Add `run_worker.py` and `wait_worker.py`: one wrapper owns OpenCode process/DB/log/session bookkeeping and emits a durable terminal event; harnesses wait natively or through one long blocking helper rather than model-level polling.
+- Claude adapter now uses a project `PostToolUse:Bash` `asyncRewake` hook to wait on the detached OpenCode wrapper terminal event and wake idle Claude; Codex/OpenCode use foreground or long blocking event waits. CPU/log polling is recovery-only.
+- Add a conditional Evidence Clerk role plus `evidence_gate.py` for report skeleton/misplacement, verification arithmetic, provenance/tripwire reconciliation, and cheap log/progress/handover maintenance; read-only source movement and mutating changes outside declared write scope are hard recovery failures, never clerical reconciliation.
+- Tighten worker behavior: current contract-bound mechanical helper facts are given facts; stale helper artifacts are not authority; ordinary repository mismatch is resolved from authority rather than returned as a scope-choice menu.
+- Add full Git-worktree per-attempt scope baselines and exact `Allowed source changes` for mutating roles, with symlink-safe hashing and hard scope-drift enforcement.
+- Add atomic attempt reservations so the same numbered attempt/report/log cannot be launched twice, and prohibit task-owned background writers after FINAL.
+- Bind each attempt cryptographically to its exact launch prompt, task-contract revision, worker-rules revision + manifest/protocol snapshot, and scope baseline; the evidence gate rejects post-launch mutation of any bound authority/evidence artifact.
+- Bind accepted Evidence Clerk overlays to the exact Clerk report SHA-256 so a later same-path edit cannot inherit an older CLEAN gate.
+- Keep the semantic task contract role-neutral: role-specific report paths live in immutable launch handoffs, avoiding contradictory Implementer/Reviewer deliverables.
+- Make terminal worker/review evidence immutable; later repairs/reviews use new numbered attempts.
+- Add an explicit phase write barrier: artifact-mutating verification is a writer and finishes before closure; post-barrier verification/audit is read-only, and any later mutation reopens/invalidates the gate snapshot.
+- Make routine parent narration mechanically bounded: silent by default; host-forced routine update is one sentence (~25 words).
+- Demote optional contributed adapters from core workflow assumptions; they load only when explicitly selected.
+- Incorporate selected Lunacy lessons (path-only handoffs, quiescent waits, compact control packets, immutable evidence, three-deep-read ceiling, write barrier) without copying Codex-native worker semantics or parent repository review.
+
+## v12 — Worker proof contracts
 
 ### Worker proof-contract revision
 

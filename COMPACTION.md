@@ -134,10 +134,7 @@ Before any project work:
 1. Reload `SKILL.md` and the adapter selected in `HARNESS.md`.
 2. Read live `HANDOVER.md`, `state.json`, and `plan/plan-reference.md`.
 3. Read the latest `CHECKPOINT.md` and `resume-manifest.json`.
-4. Compare plan, configuration, skill, and authority hashes.
-5. Revalidate any live worker/process and check whether reports changed during
-   compaction.
-6. Run:
+4. Run the mechanical continuity verifier:
 
    ```bash
    python3 DeepSeekAndDestroy/tools/context_checkpoint.py \
@@ -147,7 +144,9 @@ Before any project work:
      --harness <orchestrator-harness>
    ```
 
-7. Execute the live `state.json` `next_action` immediately.
+5. Revalidate any live worker/process separately; mutable execution state may have
+   legitimately advanced during compaction.
+6. Execute the live `state.json` `next_action` immediately.
 
 Do not stop after announcing that compaction or rehydration succeeded.
 
@@ -192,3 +191,16 @@ Hooks must not guess among multiple active runs. Prefer, in order:
 
 If several candidates remain, block checkpoint mutation and require an explicit
 run root. Ambiguity is safer than corrupting another orchestrator's run.
+
+
+## Resume trust boundary
+
+Compaction does not promote handover prose into technical authority. `HANDOVER.md`
+restores continuity, but technical claims remain inherited assertions. Before the
+orchestrator repeats/escalates/builds a new plan-wide decision on such a claim,
+follow its cited governing/accepted evidence or route the predicate to a worker.
+`verify-resume` itself checks governing plan-reference, authority-index, effective
+configuration, and recorded plan-source identity against the checkpoint; it fails
+closed on drift. Mutable task/worker state is intentionally revalidated separately.
+State/run identity and helper-produced mechanical facts retain their normal
+control-plane authority after a clean resume verification.

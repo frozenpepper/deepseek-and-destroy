@@ -1,83 +1,122 @@
 # DeepSeek and Destroy Configuration Example
 
-Optional partial overrides. Omitted values keep `SKILL.md` defaults. Never place
-credentials here.
+Optional overrides. Omitted values inherit `SKILL.md`. Do not put credentials here.
 
 ## Default worker
 
-- Harness: OpenCode CLI
-- Model: `opencode-go/deepseek-v4-flash`
-- Storage: one disposable external run-level OpenCode DB (see `OPENCODE.md`)
-- Execution: sequential
-- Fresh implementer/reviewer contexts: yes
-- Reviewer→fixer resume: same run DB + recorded session when healthy
-- Equivalent availability fallback: <optional profile>
+```text
+worker_harness: opencode-cli
+worker_model: opencode-go/deepseek-v4-flash
+worker_parallelism: 1
+```
 
-## Kilo alternative
+OpenCode worker storage is one external disposable DB per run. Set an external root
+only when desired:
 
-- Mutating agent: `dsd-mutating-worker`
-- Read-only agent: `dsd-readonly-worker`
-- Install: `python3 <skill-root>/scripts/install_kilo_agents.py --project-root <project-root>`
-- Default model: `deepseek/deepseek-v4-flash` (validated by installer)
+```text
+DSD_OPENCODE_STATE_ROOT=/absolute/path/outside/every/project/worktree
+```
+
+If explicit parallel OpenCode workers are enabled, use one external DB per
+concurrency lane; see `OPENCODE.md`.
+
+## Orchestrator harness
+
+```text
+orchestrator_harness: auto   # claude-code | codex | opencode | kilo | custom
+```
+
+This controls wait/compaction behavior, not the worker model. See `HARNESS.md`.
+
+## Stable worker rules
+
+Do not repeat stable environment constraints in every prompt. Pass them when
+creating an immutable run worker-rules revision such as
+`worker-rules/r0001/WORKER_RULES.md`, e.g.:
+
+```text
+worker_stable_rules:
+  - launcher working directory is authoritative; do not cd to compensate for path mistakes
+  - use exact run/report paths supplied by the task
+  - <project-specific shell restriction only if actually required>
+```
+
+Do **not** blindly copy a shell rule from another project. Rules such as “no
+heredocs” belong here only when the actual environment requires them.
 
 ## Role routing
 
-- Phase surveyor: default worker, read-only
-- Discovery: default worker, read-only
-- Implementer: default worker, mutating
-- Verification: default worker, read-only
-- Reviewer/re-reviewer: default worker, read-only and fresh
-- Fixer: resume reviewer when useful/healthy; fresh fixer after heavy review
-- Recovery auditor: default worker, fresh/read-only
-- Phase auditor: default worker, fresh/read-only
-- Main phase approver: current orchestrator
+All roles normally use the same cheap OpenCode/DeepSeek profile; role behavior comes
+from the run-local protocol snapshot and task contract:
 
-The main orchestrator is never an implicit fallback worker.
+```text
+phase-surveyor -> DeepSeek worker
+discovery      -> DeepSeek worker
+implementer    -> DeepSeek worker
+reviewer       -> fresh DeepSeek worker
+fixer          -> fresh DeepSeek worker
+verification   -> DeepSeek worker
+evidence-clerk -> DeepSeek worker (read-only unless exact contract grants a documentation write)
+recovery       -> fresh DeepSeek worker
+phase-auditor  -> fresh DeepSeek worker
+```
 
-## Worker proof contract
+No role is allowed to silently fall back to the premium orchestrator for technical
+execution. Every terminal role uses the full Git-worktree attempt baseline in the
+built-in fast path; Implementer/Fixer writes are additionally constrained by the
+contract's exact `Allowed source changes`.
 
-- Stable AC IDs: required for meaningful criteria
-- Proof Obligations: required for non-trivial behavioral criteria
-- Counterexample-first review: enabled
-- Proof patterns: attach only when relevant (`NEGATIVE-GATE`, `CARDINALITY`,
-  `IDENTITY`, `DURABILITY`, `DERIVED-EVIDENCE`)
-- Fast path: requires complete PASS Proof Matrix + no task-relevant defects +
-  structural review-contract validation
+## Reviewer attack budget
 
-## Execution
+```text
+review_risk_hypotheses_max: 3
+```
 
-- Review rounds: 5
-- Immediate transport attempts: 5
-- Startup liveness grace: 90 seconds
-- Default execution: sequential
-- PASS standard: zero unresolved task-relevant findings
-- Live/destructive/paid/external tests: require authorization
-- Worker availability: health probe → bounded backoff → equivalent fallback →
-  HUMAN-BLOCKED only when external intervention is required
+Use sharp falsifiable hypotheses with an executable attack; do not spend the budget
+on generic concerns already covered by Worker Core.
 
-## Task sizing
+## Evidence Clerk
 
-- One independently reviewable unit per worker by default
-- Split discovery from construction when unfamiliar
-- Split independently reviewable verification classes
-- Use worker-produced construction briefs and Proof Obligations for non-trivial
-  tasks rather than premium-orchestrator rediscovery
+Default is conditional, not ceremonial:
 
-## Project rules
+```text
+evidence_clerk: on-demand
+```
 
-- Read `AGENTS.md`, `CLAUDE.md`, architecture docs, authoritative plan and referenced
-  schemas/guides when present.
-- Additional implementation rules: <optional path>
-- Additional review/domain rules: <optional path>
+Run it when `evidence_gate.py` returns `CLERK REQUIRED` or when technical
+major-log/progress/handover maintenance would otherwise consume premium context.
+It never owns `state.json` or acceptance.
 
-## Orchestrator context checkpoints
+## User narration
 
-- Enabled: yes
-- Harness: auto-detect; explicit value wins
-- Checkpoint due: 65%
-- Compact before: 75%
-- Hard ceiling: 80%
-- Safe-boundary fallback when percentage unavailable: every 4 accepted tasks and
-  before long phase gate
-- HANDOVER: compact/incremental; update when resume semantics materially change
-- Global harness configuration changes: no
+```text
+routine_user_update_words: 25
+```
+
+Routine transitions are silent unless the host requires an update; then use one
+sentence. Expanded prose only for material correction, human blocker, consequential
+decision, phase result, final completion, or direct user request.
+
+## Context checkpoints
+
+```text
+checkpoint_due_percent: 65
+compact_before_percent: 75
+hard_ceiling_percent: 80
+```
+
+Use exact percentages only when the host exposes real context usage. Otherwise use
+native hooks/safe-boundary fallback from `COMPACTION.md`.
+
+## Kilo Code
+
+Kilo is a first-class orchestrator harness. The default worker backend remains
+OpenCode/DeepSeek. To explicitly select Kilo-native workers, install the project
+subagents and use the native attempt lifecycle in `KILO.md`; native delegation does
+not bypass DSD scope/evidence gates. A run that opts into the native backend records
+that choice explicitly, for example:
+
+```text
+worker_harness: kilo-native
+worker_model: deepseek/deepseek-v4-flash
+```

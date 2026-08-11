@@ -25,6 +25,11 @@ export const DeepSeekAndDestroyCompaction: Plugin = async (ctx) => {
         "--project-root", root,
         "instruction",
       ], { stdout: "pipe", stderr: "pipe" })
+      if (rehydrate.exitCode !== 0) {
+        const stderr = new TextDecoder().decode(rehydrate.stderr).trim()
+        output.context.push(`\n## DeepSeek and Destroy checkpoint warning\nResume-instruction generation failed: ${stderr}\nDo not assume continuity is safe.\n`)
+        return
+      }
       const text = new TextDecoder().decode(rehydrate.stdout).trim()
       output.context.push(`\n## DeepSeek and Destroy durable continuation\n${text}\n`)
     },

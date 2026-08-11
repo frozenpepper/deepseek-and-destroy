@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Structurally validate a DSD task/reviewer proof contract.
+"""Inspect a DSD Reviewer report against task ACs without judging software semantics.
 
-This helper does NOT judge software correctness. It checks that the reviewer
-covered every task AC in a Proof Matrix and that fast-path metadata is internally
-consistent with the review's own declared defects/results.
+A canonical Proof Matrix is preferred because it gives a cheap decision surface.
+Formatting/coverage that cannot be parsed is a Clerk-normalizable condition, not an
+automatic invalidation of a long review. Explicit semantic contradictions remain
+hard errors.
 """
 from __future__ import annotations
 
@@ -13,7 +14,6 @@ import re
 from pathlib import Path
 
 AC_RE = re.compile(r"\bAC-\d+\b", re.IGNORECASE)
-FAST_RE = re.compile(r"^\s*FAST-PATH\s+ELIGIBLE\s*:\s*(YES|NO)\b", re.IGNORECASE | re.MULTILINE)
 DEFECT_RE = re.compile(r"^\s*TASK-RELEVANT\s+DEFECTS\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 VERDICT_RE = re.compile(r"^\s*VERDICT\s*:\s*(PASS|FAIL)\s*$", re.IGNORECASE | re.MULTILINE)
 PROOF_HEADING_RE = re.compile(r"^##\s+Proof\s+Matrix\s*$", re.IGNORECASE | re.MULTILINE)
@@ -21,10 +21,7 @@ HEADING_RE = re.compile(r"^##\s+", re.MULTILINE)
 
 
 def read(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise SystemExit(f"ERROR: cannot read {path}: {exc}") from exc
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def ordered_unique(items: list[str]) -> list[str]:
@@ -52,9 +49,9 @@ def proof_section(text: str) -> str:
 
 
 def parse_matrix(text: str) -> dict[str, dict[str, str]]:
-    section = proof_section(text)
+    """Parse the canonical table when present; non-table review prose is left for Clerk."""
     rows: dict[str, dict[str, str]] = {}
-    for raw in section.splitlines():
+    for raw in proof_section(text).splitlines():
         line = raw.strip()
         if not line.startswith("|") or not line.endswith("|"):
             continue
@@ -81,90 +78,85 @@ def parse_matrix(text: str) -> dict[str, dict[str, str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", type=Path, required=True, help="task.md or equivalent contract")
-    parser.add_argument("--review", type=Path, required=True, help="review report")
-    parser.add_argument("--require-pass", action="store_true", help="also require reviewer PASS + all rows PASS")
-    parser.add_argument("--json", action="store_true", help="emit machine-readable result")
+    parser.add_argument("--task", type=Path, required=True)
+    parser.add_argument("--review", type=Path, required=True)
+    parser.add_argument("--require-pass", action="store_true")
+    parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     task_text = read(args.task)
     review_text = read(args.review)
     task_acs = extract_task_acs(task_text)
+    review_acs = set(extract_task_acs(review_text))
     matrix = parse_matrix(review_text)
     errors: list[str] = []
+    normalize: list[str] = []
 
     if not task_acs:
         errors.append("task contains no stable AC-* identifiers")
-    if not matrix:
-        errors.append("review contains no parseable ## Proof Matrix rows")
+
+    verdict_match = VERDICT_RE.search(review_text)
+    verdict = verdict_match.group(1).upper() if verdict_match else None
+    defect_match = DEFECT_RE.search(review_text)
+    defects = defect_match.group(1).strip() if defect_match else None
+
+    if verdict is None:
+        errors.append("missing literal VERDICT: PASS|FAIL")
+
+    if not matrix and task_acs:
+        normalize.append("canonical Proof Matrix is absent/unparseable")
+
+    # Serialization can be normalized, but a Reviewer that never even accounts
+    # for an AC leaves no stable semantic anchor for the Clerk to normalize.
+    # Requiring the AC id somewhere is intentionally much weaker than requiring
+    # a particular Markdown table shape.
+    missing_semantic_acs = [ac for ac in task_acs if ac not in review_acs]
+    if missing_semantic_acs:
+        errors.append("review does not account for task AC id(s): " + ", ".join(missing_semantic_acs))
 
     for ac in task_acs:
         row = matrix.get(ac)
         if row is None:
-            errors.append(f"missing Proof Matrix row for {ac}")
+            normalize.append(f"{ac} has no canonical Proof Matrix row")
             continue
         if "error" in row:
-            errors.append(f"{ac}: {row['error']}")
+            normalize.append(f"{ac}: {row['error']}")
             continue
         if not row["mechanism"] or row["mechanism"].upper() in {"N/A", "NA", "?"}:
-            errors.append(f"{ac}: mechanism explanation is empty/N/A")
+            normalize.append(f"{ac}: mechanism explanation is empty/N/A")
         if row["result"] not in {"PASS", "FAIL"}:
-            errors.append(f"{ac}: result must be PASS or FAIL, got {row['result']!r}")
-
-    extra = sorted(set(matrix) - set(task_acs))
-
-    fast_match = FAST_RE.search(review_text)
-    defect_match = DEFECT_RE.search(review_text)
-    verdict_match = VERDICT_RE.search(review_text)
-    fast = fast_match.group(1).upper() if fast_match else None
-    defects = defect_match.group(1).strip() if defect_match else None
-    verdict = verdict_match.group(1).upper() if verdict_match else None
-
-    if fast is None:
-        errors.append("missing FAST-PATH ELIGIBLE: YES|NO")
-    if defects is None:
-        errors.append("missing TASK-RELEVANT DEFECTS: ...")
-    if verdict is None:
-        errors.append("missing literal VERDICT: PASS|FAIL")
+            normalize.append(f"{ac}: result is not canonical PASS/FAIL")
 
     row_failures = sorted(ac for ac, row in matrix.items() if row.get("result") == "FAIL")
     defects_none = defects is not None and defects.upper() == "NONE"
-
-    if fast == "YES":
-        if not defects_none:
-            errors.append("FAST-PATH YES conflicts with non-NONE/missing task-relevant defects")
-        if verdict != "PASS":
-            errors.append("FAST-PATH YES requires VERDICT: PASS")
-        if row_failures:
-            errors.append("FAST-PATH YES conflicts with FAIL Proof Matrix rows: " + ", ".join(row_failures))
-        missing = [ac for ac in task_acs if ac not in matrix]
-        if missing:
-            errors.append("FAST-PATH YES conflicts with missing AC rows")
-
     if verdict == "PASS":
         if row_failures:
-            errors.append("VERDICT PASS conflicts with FAIL Proof Matrix rows: " + ", ".join(row_failures))
-        if not defects_none:
-            errors.append("VERDICT PASS requires TASK-RELEVANT DEFECTS: NONE")
+            errors.append("VERDICT PASS conflicts with explicit FAIL Proof Matrix rows: " + ", ".join(row_failures))
+        if defects is None:
+            normalize.append("PASS review omitted Task-relevant defects summary")
+        elif not defects_none:
+            errors.append("VERDICT PASS conflicts with non-NONE task-relevant defects")
 
+    if args.require_pass and verdict != "PASS":
+        errors.append("--require-pass: reviewer verdict is not PASS")
     if args.require_pass:
-        if verdict != "PASS":
-            errors.append("--require-pass: reviewer verdict is not PASS")
         for ac in task_acs:
-            if matrix.get(ac, {}).get("result") != "PASS":
-                errors.append(f"--require-pass: {ac} is not PASS")
-        if fast != "YES":
-            errors.append("--require-pass: FAST-PATH ELIGIBLE is not YES")
+            row = matrix.get(ac, {})
+            if row and row.get("result") == "FAIL":
+                errors.append(f"--require-pass: {ac} is explicitly FAIL")
 
     result = {
-        "ok": not errors,
+        "ok": not errors and not normalize,
+        "semantic_ok": not errors,
+        "normalization_required": bool(normalize),
+        "normalization_reasons": list(dict.fromkeys(normalize)),
         "task": str(args.task),
         "review": str(args.review),
         "task_acs": task_acs,
+        "review_acs": sorted(review_acs),
         "matrix_acs": sorted(matrix),
-        "extra_matrix_acs": extra,
+        "extra_matrix_acs": sorted(set(matrix) - set(task_acs)),
         "verdict": verdict,
-        "fast_path": fast,
         "task_relevant_defects": defects,
         "errors": errors,
     }
@@ -172,17 +164,20 @@ def main() -> int:
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
-        print("REVIEW CONTRACT: " + ("PASS" if result["ok"] else "FAIL"))
-        print(f"AC coverage: {len(matrix)}/{len(task_acs)} matrix rows (task ACs)")
-        if extra:
-            print("Extra matrix ACs: " + ", ".join(extra))
+        state = "PASS" if result["ok"] else "NORMALIZE" if result["semantic_ok"] else "FAIL"
+        print("REVIEW CONTRACT: " + state)
+        print(f"AC coverage: {len(matrix)}/{len(task_acs)} canonical rows")
         print(f"Reviewer verdict: {verdict or 'MISSING'}")
-        print(f"Fast-path: {fast or 'MISSING'}")
-        print(f"Task-relevant defects: {defects or 'MISSING'}")
+        for reason in result["normalization_reasons"]:
+            print("- normalize: " + reason)
         for error in errors:
-            print("- " + error)
+            print("- error: " + error)
 
-    return 0 if result["ok"] else 1
+    if errors:
+        return 1
+    if normalize:
+        return 4
+    return 0
 
 
 if __name__ == "__main__":

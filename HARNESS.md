@@ -1,39 +1,53 @@
-# DeepSeek and Destroy — Orchestrator Harness Selection
+# DeepSeek and Destroy — Harness Routing
 
-Worker harness and main-orchestrator harness are independent. Resolve the
-orchestrator harness from explicit configuration/current session before using
-heuristics.
+DSD separates two runtimes:
 
-## Selection
+- **worker harness** — cheap technical execution; default OpenCode CLI + DeepSeek;
+- **parent harness** — premium orchestrator; controls launch/wake/checkpoint plumbing.
 
-1. Explicit `DSD_ORCHESTRATOR_HARNESS`/configuration wins.
-2. Otherwise use current session/system identity.
-3. `scripts/detect_harness.py` may provide a conservative hint.
-4. Ambiguous detection must not silently select an adapter.
+The worker lifecycle is not a native Codex/Claude subagent lifecycle unless a
+non-default native worker backend is explicitly selected.
 
-Supported adapters:
+## Select the parent adapter
 
-| Harness | DSD adapter | Native/project hook status |
-|---|---|---|
-| Codex | `CODEX.md` | pre/post/session resume hooks |
-| Claude Code | `CLAUDE.md` | pre/post/session resume hooks |
-| OpenCode | `OPENCODE.md` | pre-compaction plugin + DSD rehydration invariant |
-| Kilo Code | `KILOCODE.md` | project plugin; live compaction acceptance recommended |
-| Other | `COMPACTION.md` | manual/fresh-session fallback |
+Prefer explicit config (`DSD_ORCHESTRATOR_HARNESS`), then current session identity,
+then `detect_harness.py` as a conservative hint. If ambiguous, use generic behavior
+unless a harness-specific capability is actually required.
 
-## Install
+Load exactly one adapter (`CODEX.md`, `CLAUDE.md`, `OPENCODE.md`, `KILO.md`, or the generic fallback). This file
+states routing only; adapter files own host-specific mechanics.
+
+## Universal wait invariant
+
+Normal waiting is quiescent. External workers use the exact `terminal.json` emitted
+after wrapper process exit; the one-second check inside `wait_worker.py` is mechanical
+and consumes no model turns. A host/tool timeout with no terminal event is a
+**non-event**: wait again without logs, CPU checks, state narration, or repository
+inspection. Those are recovery diagnostics only after an actual inconsistency.
+
+A supported native backend uses its native Task return as the terminal boundary and
+then immediately finalizes the same DSD `terminal.json`; see that adapter. Semantic
+PASS/FAIL is never inferred from transport completion.
+
+## Checkpoint routing
+
+Compaction/checkpoint integration is separate from worker waiting. Load the active
+adapter and `COMPACTION.md` only when checkpoint/resume behavior is relevant.
+
+Install only the selected project-local adapter:
 
 ```bash
-python3 <skill-root>/scripts/install_compaction_adapter.py \
+python3 <skill-root>/scripts/install_harness_adapter.py \
   --project-root <project-root> \
   --harness <codex|claude-code|opencode|kilo>
 ```
 
-The installer is project-local, copies `context_checkpoint.py` and `check_state.py`
-into `DeepSeekAndDestroy/tools/`, backs up modified JSON settings where applicable,
-and writes an installation report. It does not silently modify user-global harness
-configuration.
 
-Regardless of harness, the external DSD checkpoint is the continuity authority;
-native summaries are advisory. After compaction/session replacement, execute
-`verify-resume` before project work.
+
+## Kilo Code
+
+When the premium parent runs in Kilo, use `KILO.md`. Install the project-local
+continuity plugin with `install_harness_adapter.py --harness kilo`. The default
+worker remains external OpenCode unless the run explicitly selects the Kilo-native
+backend; Kilo-native subagents use `native_worker_attempt.py` so they enter the
+same immutable launch/evidence/scope lifecycle.

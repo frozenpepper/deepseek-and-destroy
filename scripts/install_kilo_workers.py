@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install DSD's role-separated Kilo Code subagents."""
+"""Install DSD's first-class Kilo Code worker subagents."""
 from __future__ import annotations
 
 import argparse
@@ -58,8 +58,8 @@ def backup(path: Path) -> str | None:
     return str(dst)
 
 
-def install_set(skill_root: Path, target: Path, model: str) -> list[dict[str, object]]:
-    template_dir = skill_root / "adapters" / "kilo" / "agents"
+def install_set(adapter_root: Path, target: Path, model: str) -> list[dict[str, object]]:
+    template_dir = adapter_root / "agents"
     target.mkdir(parents=True, exist_ok=True)
     out: list[dict[str, object]] = []
     for name in AGENTS:
@@ -79,25 +79,25 @@ def install_set(skill_root: Path, target: Path, model: str) -> list[dict[str, ob
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument("--skill-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--adapter-root", type=Path, default=Path(__file__).resolve().parent.parent / "adapters" / "kilo")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--global", dest="global_install", action="store_true")
     parser.add_argument("--skip-model-verify", action="store_true")
     args = parser.parse_args()
 
     project = git_root(args.project_root)
-    skill = args.skill_root.resolve()
+    adapter = args.adapter_root.resolve()
     try:
         if not args.skip_model_verify:
             verify_model(args.model)
         entries = [
             {**e, "scope": "project"}
-            for e in install_set(skill, project / ".kilo" / "agents", args.model)
+            for e in install_set(adapter, project / ".kilo" / "agents", args.model)
         ]
         if args.global_install:
             entries.extend(
                 {**e, "scope": "global"}
-                for e in install_set(skill, Path.home() / ".config" / "kilo" / "agents", args.model)
+                for e in install_set(adapter, Path.home() / ".config" / "kilo" / "agents", args.model)
             )
         result = {
             "model": args.model,
