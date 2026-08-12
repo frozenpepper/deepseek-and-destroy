@@ -1,5 +1,11 @@
 # Changelog
 
+## v15.4.3 — Stable phase finalization
+
+- Require all selector/pointer/promotion/finalization operations that establish or refer to a final snapshot to be exercised before the freeze is declared final.
+- Treat any finalization that requires later mutation of an artifact inside that same snapshot, or creates a self-invalidating dependency cycle, as a phase defect.
+- Added only concise parent/Phase-Auditor doctrine; no new validator, state, helper, proof pattern, or document.
+
 ## v15.4.2 — Premium trust/context discipline
 
 - Make worker trust explicit: fresh Reviewer is routine technical verification; parent technical self-verification is reserved for frozen phase approval or explicit worker escalation.

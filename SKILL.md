@@ -77,6 +77,6 @@ Missing technical proof goes to targeted Verification/Review, never Clerk or a r
 
 A clean mechanical gate means **safe to interpret**, never semantic PASS. Hard failures are objective integrity failures only; worker prose is natural engineering evidence, not a machine protocol. The parent makes semantic decisions and `accept-task` records their evidence provenance.
 
-Phase close: finish writers → freeze → required post-barrier verification → fresh Phase Auditor → **parent phase judgment**. This is the normal place for parent targeted technical verification. Any mutation invalidates stale phase evidence.
+Phase close: finish writers → exercise every selector/pointer/promotion/finalization operation that will establish or refer to the final snapshot → freeze → required post-barrier verification → fresh Phase Auditor → **parent phase judgment**. Finalization must not require a later mutation of any artifact inside that same snapshot or create a self-invalidating dependency cycle. This is the normal place for parent targeted technical verification; any later mutation invalidates stale phase evidence.
 
 Ask the human only for genuinely uninferable authority, access/authorization, destructive/paid/live permission, unsafe concurrency, persistent worker unavailability, or irreconcilable authority conflict. Give the finding and recommendation, not a menu.
