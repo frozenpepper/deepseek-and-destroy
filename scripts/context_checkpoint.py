@@ -90,7 +90,7 @@ def active_state_paths(project_root: Path) -> list[Path]:
     return sorted(candidates)
 
 
-def choose_run(project_root: Path, explicit: str | None, session_id: str | None) -> tuple[Path, dict[str, Any]]:
+def choose_run(project_root: Path, explicit: str | None, session_id: str | None, *, prefer_checkpoint: bool = False) -> tuple[Path, dict[str, Any]]:
     requested = explicit or os.environ.get("DSD_RUN_ROOT")
     if requested:
         run_root = Path(requested)
@@ -117,6 +117,18 @@ def choose_run(project_root: Path, explicit: str | None, session_id: str | None)
                 matching.append(path)
         if len(matching) == 1:
             return matching[0].parent, read_json(matching[0])
+    if prefer_checkpoint and len(paths) > 1:
+        checkpoint_candidates: list[Path] = []
+        for path in paths:
+            try:
+                state = read_json(path)
+            except Exception:
+                continue
+            checkpoint_status = str((state.get("context_checkpoint") or {}).get("status", "")).lower()
+            if checkpoint_status in {"prepared", "compacting", "rehydration-required"}:
+                checkpoint_candidates.append(path)
+        if len(checkpoint_candidates) == 1:
+            return checkpoint_candidates[0].parent, read_json(checkpoint_candidates[0])
     if len(paths) == 1:
         return paths[0].parent, read_json(paths[0])
     if not paths:
@@ -256,7 +268,7 @@ Read these after compaction or in a replacement orchestrator session:
 2. `{run_root / 'state.json'}`
 3. `{run_root / 'plan/plan-reference.md'}`
 4. `{manifest_path}`
-5. the exact accepted evidence referenced by `HANDOVER.md`
+5. the exact accepted semantic-evidence / Clerk reports referenced by `HANDOVER.md`
 
 Immutable snapshots captured with this checkpoint:
 
@@ -327,7 +339,7 @@ def set_checkpoint_status(run_root: Path, status: str, **extra: Any) -> None:
 
 
 def rehydrate_text(project_root: Path, run_root_arg: str | None, session_id: str | None, *, mark_required: bool = True) -> str:
-    run_root, state = choose_run(project_root, run_root_arg, session_id)
+    run_root, state = choose_run(project_root, run_root_arg, session_id, prefer_checkpoint=True)
     sequence, checkpoint_md, manifest_path = latest_checkpoint(run_root)
     checkpoint = state.get("context_checkpoint") or {}
     if mark_required:

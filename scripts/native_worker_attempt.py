@@ -3,8 +3,8 @@
 
 Use `reserve` immediately before invoking a native subagent/Task tool, then
 `finalize` exactly once after that tool returns. The native tool return is the
-terminal boundary; semantic PASS/FAIL remains in the worker report and is handled
-by the ordinary evidence gate.
+terminal boundary. Worker-report meaning is interpreted by Evidence Clerk / the
+premium orchestrator; the integrity gate does not parse semantic conclusions.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+from _contract import validate_role_contract
 from _roles import ROLE_NAMES
 from _rules_snapshot import sha256_file, verify_snapshot
 from run_worker import atomic_json, now, reserve_attempt
@@ -49,6 +50,11 @@ def reserve(args: argparse.Namespace) -> int:
     for label in ("prompt", "task_contract", "worker_rules", "scope_baseline"):
         if not paths[label].is_file():
             raise ValueError(f"{label} missing: {paths[label]}")
+    role_contract_errors = validate_role_contract(
+        args.role, paths["task_contract"].read_text(encoding="utf-8", errors="replace")
+    )
+    if role_contract_errors:
+        raise ValueError("; ".join(role_contract_errors))
     if paths["worker_rules"].name != "WORKER_RULES.md":
         raise ValueError("worker-rules path must name WORKER_RULES.md")
     snapshot = verify_snapshot(paths["worker_rules"])
@@ -65,7 +71,7 @@ def reserve(args: argparse.Namespace) -> int:
     if args.attempt < 1:
         raise ValueError("attempt must be >= 1")
 
-    shim = SimpleNamespace(task_id=args.task_id, role=args.role, attempt=args.attempt)
+    shim = SimpleNamespace(task_id=args.task_id, role=args.role, attempt=args.attempt, force_read_only=args.force_read_only)
     reserved_at, error = reserve_attempt(shim, paths)
     if error or reserved_at is None:
         raise ValueError(error or "attempt reservation failed")
@@ -86,6 +92,7 @@ def reserve(args: argparse.Namespace) -> int:
         "launch_reservation_sha256": reservation_sha,
         "reserved_at": reserved_at,
         "started_at": now(),
+        "writes_project": bool(json.loads(reservation.read_text(encoding="utf-8")).get("writes_project")),
     })
     print(json.dumps({
         "status": "reserved",
@@ -162,6 +169,7 @@ def parser() -> argparse.ArgumentParser:
     r.add_argument("--report", type=Path, required=True)
     r.add_argument("--event-dir", type=Path, required=True)
     r.add_argument("--log", type=Path, required=True)
+    r.add_argument("--force-read-only", action="store_true", help="reserve native attempt as project-read-only regardless of task write scope")
     f = sub.add_parser("finalize", help="write terminal event after native Task invocation returns")
     f.add_argument("--event-dir", type=Path, required=True)
     f.add_argument("--status", choices=("completed", "process-error", "transport-error"), required=True)

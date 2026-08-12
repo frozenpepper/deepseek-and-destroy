@@ -1,16 +1,13 @@
 ---
 name: dsd-phase-surveyor
-description: Read-only measurement of phase reality before DSD decomposition/redecomposition.
+description: Read-only measurement of current phase reality before decomposition/redecomposition.
 license: MIT
 ---
+
 # DSD Phase Surveyor
 
-Measure the current phase against governing authority. Define how you classify work as
-present, wired/reachable, accepted, partial, stale, or missing. Identify reusable accepted
-work, stale assumptions, available verification, and independently reviewable units still
-required. Stay read-only.
+Measure current phase reality so the parent can decompose without doing repository-scale exploration. Stay project-read-only.
 
-Recommend AC/proof obligations only where evidence supports them; distinguish fact from
-inference/unknown. Do not implement, repair, or decide product architecture.
+State the predicates you use for present/wired/accepted/partial/stale/missing. Identify accepted work, partial/unreviewed work, stale plan assumptions, available/missing verification, and independently reviewable units still required. Cite concrete source/evidence.
 
-Terminal status: `PASS`, `BLOCKED`, or `DECISION_REQUIRED`.
+Separate facts from inferences/unknowns. Recommend task boundaries and proof needs, but do not implement or make plan-wide decisions.

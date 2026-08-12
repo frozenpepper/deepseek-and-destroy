@@ -1,295 +1,524 @@
 #!/usr/bin/env python3
-"""Thin transaction wrapper for the normal DSD external-worker attempt lifecycle.
+"""Prepare/launch/gate one DSD external OpenCode attempt from durable state.
 
-It derives mechanical paths/configuration from state.json, but never chooses a role,
-changes task semantics, retries a worker, or decides acceptance.
+The premium parent chooses task semantics and role. This helper derives the repetitive
+attempt paths/configuration, captures the scope baseline, renders the tiny prompt,
+launches the existing OpenCode wrapper, and binds state. It does not accept tasks or
+make routing decisions.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-from report_surface import extract as extract_surface
 from _roles import ROLE_NAMES
 
 
-def run(cmd: list[str], *, capture: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, text=True, capture_output=capture, check=False)
 
 
-def fail(message: str) -> int:
-    print(f"ERROR: {message}", file=sys.stderr)
-    return 2
-
-
-def load_state(path: Path) -> tuple[dict[str, Any], Path, Path]:
-    if not path.is_absolute():
-        raise ValueError("--state must be absolute")
-    state_path = path.resolve()
-    data = json.loads(state_path.read_text(encoding="utf-8"))
+def read_json(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError("state.json must contain one object")
-    project = Path(str(data.get("project_worktree", "")))
-    if not project.is_absolute():
-        raise ValueError("state project_worktree must be absolute")
-    project = project.resolve()
-    run_value = Path(str(data.get("run_root", "")))
-    run_root = run_value.resolve() if run_value.is_absolute() else (project / run_value).resolve()
-    if state_path.parent.resolve() != run_root:
-        raise ValueError(f"--state must be the active run state.json ({run_root / 'state.json'})")
-    return data, project, run_root
+        raise ValueError(f"expected JSON object: {path}")
+    return data
 
 
-def resolve_state_path(value: Any, project: Path, run_root: Path) -> Path:
-    path = Path(str(value))
-    if path.is_absolute():
-        return path.resolve()
-    # DSD state convention stores run paths project-relative.
-    project_candidate = (project / path).resolve()
-    if project_candidate.exists() or str(path).startswith("DeepSeekAndDestroy/"):
-        return project_candidate
-    return (run_root / path).resolve()
+def project_root_from_run(run_root: Path, state: dict[str, Any]) -> Path:
+    raw = state.get("project_worktree")
+    if isinstance(raw, str) and raw.strip():
+        path = Path(raw)
+        if not path.is_absolute():
+            path = (run_root / path).resolve()
+        if path.is_dir():
+            return path.resolve()
+    for ancestor in [run_root, *run_root.parents]:
+        if ancestor.name == "DeepSeekAndDestroy":
+            return ancestor.parent.resolve()
+    raise ValueError("cannot derive project root from run; state.project_worktree is missing/invalid")
 
 
-def task_ref(state: dict[str, Any], phase: str, task: str) -> dict[str, Any]:
+def phase_task(state: dict[str, Any], phase_id: str, task_id: str) -> dict[str, Any]:
+    phase = (state.get("phases") or {}).get(phase_id)
+    if not isinstance(phase, dict):
+        raise ValueError(f"phase not found: {phase_id}")
+    task = (phase.get("tasks") or {}).get(task_id)
+    if not isinstance(task, dict):
+        raise ValueError(f"task not found: {phase_id}/{task_id}")
+    return task
+
+
+def resolve_run_path(run_root: Path, raw: str | Path) -> Path:
+    path = Path(raw)
+    if not path.is_absolute():
+        path = run_root / path
+    path = path.resolve()
     try:
-        value = state["phases"][phase]["tasks"][task]
-    except (KeyError, TypeError) as exc:
-        raise ValueError(f"state has no task {phase}/{task}") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"state task {phase}/{task} is not an object")
-    return value
+        path.relative_to(run_root)
+    except ValueError as exc:
+        raise ValueError(f"path is outside run root: {path}") from exc
+    return path
 
 
-def next_attempt(task_root: Path, role: str) -> int:
+def next_attempt_number(task_root: Path, role: str) -> int:
     attempts = task_root / "attempts"
-    highest = 0
+    maximum = 0
     if attempts.is_dir():
         pattern = re.compile(rf"^{re.escape(role)}-(\d+)$")
         for child in attempts.iterdir():
             match = pattern.match(child.name)
             if match:
-                highest = max(highest, int(match.group(1)))
-    return highest + 1
+                maximum = max(maximum, int(match.group(1)))
+    return maximum + 1
 
 
-def free_numbered(path: Path) -> Path:
-    if not path.exists():
-        return path
-    for n in range(2, 10000):
-        candidate = path.with_name(f"{path.stem}-{n:02d}{path.suffix}")
-        if not candidate.exists():
-            return candidate
-    raise ValueError(f"cannot allocate immutable sibling for {path}")
+def run_checked(cmd: list[str], *, input_text: str | None = None, allowed: set[int] = {0}) -> subprocess.CompletedProcess[str]:
+    cp = subprocess.run(cmd, text=True, input=input_text, capture_output=True, check=False)
+    if cp.returncode not in allowed:
+        detail = (cp.stderr or cp.stdout).strip()
+        raise RuntimeError(f"command failed ({cp.returncode}): {' '.join(cmd)}\n{detail[:4000]}")
+    return cp
+
+
+def current_contract(run_root: Path, task: dict[str, Any]) -> Path:
+    binding = task.get("current_contract") or {}
+    raw = binding.get("path")
+    if not isinstance(raw, str):
+        raise ValueError("task.current_contract.path is missing; bind the contract first")
+    path = resolve_run_path(run_root, raw)
+    if not path.is_file():
+        raise ValueError(f"current contract missing: {path}")
+    return path
+
+
+def current_worker_rules(run_root: Path, state: dict[str, Any], override: str | None) -> Path:
+    raw = override or (state.get("worker_rules") or {}).get("path")
+    if not isinstance(raw, str):
+        raise ValueError("state.worker_rules.path is missing; prepare/bind worker rules first")
+    path = resolve_run_path(run_root, raw)
+    if not path.is_file():
+        raise ValueError(f"worker rules missing: {path}")
+    return path
+
+
+def opencode_runtime(state: dict[str, Any], db_override: str | None, model_override: str | None) -> tuple[Path, str]:
+    runtime = state.get("worker_runtime") or {}
+    harness = str(runtime.get("harness") or "opencode-cli")
+    if harness not in {"opencode-cli", "opencode"}:
+        raise ValueError(f"dsd_attempt launch supports external OpenCode only; configured worker harness is {harness!r}")
+    model = model_override or runtime.get("model") or "opencode-go/deepseek-v4-flash"
+    db_raw = db_override or (runtime.get("opencode") or {}).get("run_db") or os.environ.get("DSD_OC_RUN_DB")
+    if not isinstance(db_raw, str) or not db_raw.strip():
+        raise ValueError("OpenCode run DB is not configured (state.worker_runtime.opencode.run_db, --db, or DSD_OC_RUN_DB)")
+    db = Path(db_raw)
+    if not db.is_absolute():
+        raise ValueError(f"OpenCode DB must be absolute and outside the project: {db}")
+    return db.resolve(), str(model)
 
 
 def launch(args: argparse.Namespace) -> int:
-    state, project, run_root = load_state(args.state)
-    task = task_ref(state, args.phase, args.task)
-    contract_meta = task.get("current_contract") or {}
-    contract_value = contract_meta.get("path")
-    if not contract_value:
-        raise ValueError(f"{args.phase}/{args.task} has no current_contract")
-    contract = resolve_state_path(contract_value, project, run_root)
-    if not contract.is_file():
-        raise ValueError(f"current contract missing: {contract}")
+    run_root = args.run_root.resolve()
+    state_path = run_root / "state.json"
+    state = read_json(state_path)
+    task = phase_task(state, args.phase_id, args.task_id)
+    role = args.role
 
-    rules_meta = state.get("worker_rules") or {}
-    worker_rules = resolve_state_path(rules_meta.get("path"), project, run_root)
-    if not worker_rules.is_file():
-        raise ValueError(f"worker rules missing: {worker_rules}")
-
+    project_root = project_root_from_run(run_root, state)
+    contract = current_contract(run_root, task)
+    worker_rules = current_worker_rules(run_root, state, args.worker_rules)
+    db, model = opencode_runtime(state, args.db, args.model)
     task_root = contract.parent.parent if contract.parent.name == "contracts" else contract.parent
-    attempt_no = next_attempt(task_root, args.role)
-    attempt_dir = task_root / "attempts" / f"{args.role}-{attempt_no}"
-    prompt = attempt_dir / "prompt.txt"
-    baseline = attempt_dir / "scope-baseline.json"
-    report = attempt_dir / "report.md"
-    log = attempt_dir / "worker.log"
-
-    runtime = state.get("worker_runtime") or {}
-    model = args.model or runtime.get("model") or "opencode-go/deepseek-v4-flash"
-    opencode = runtime.get("opencode") or {}
-    db_value = args.db or opencode.get("run_db")
-    if not db_value:
-        raise ValueError("worker DB not configured in state worker_runtime.opencode.run_db; pass --db")
-    db = Path(str(db_value)).expanduser().resolve()
     try:
-        db.relative_to(project)
-    except ValueError:
-        pass
-    else:
-        raise ValueError("worker DB must live outside the project tree")
+        task_root.relative_to(run_root)
+    except ValueError as exc:
+        raise ValueError(f"task root is outside run root: {task_root}") from exc
 
-    attempt_dir.mkdir(parents=True, exist_ok=False)
     scripts = Path(__file__).resolve().parent
-    try:
-        capture = run([
-            sys.executable, str(scripts / "scope_snapshot.py"), "capture",
-            "--root", str(project), "--output", str(baseline), "--git-worktree",
-            "--exclude-prefix", "DeepSeekAndDestroy", "--task-contract", str(contract),
-        ])
-        if capture.returncode != 0:
-            raise ValueError((capture.stderr or capture.stdout).strip() or "scope baseline capture failed")
+    # Fail before launching a worker if state/contract binding or prior-attempt lifecycle
+    # cannot support a clean transition. This prevents "worker launched, state bind failed".
+    preflight_cmd = [
+        sys.executable, str(scripts / "dsd_state.py"), "preflight-attempt",
+        "--run-root", str(run_root), "--phase-id", args.phase_id,
+        "--task-id", args.task_id, "--contract", str(contract),
+    ]
+    if getattr(args, "supersede_incomplete", False):
+        preflight_cmd.append("--supersede-incomplete")
+    run_checked(preflight_cmd)
 
-        render_cmd = [
+    attempt = args.attempt or next_attempt_number(task_root, role)
+    if attempt < 1:
+        raise ValueError("attempt must be >= 1")
+    event_dir = task_root / "attempts" / f"{role}-{attempt}"
+    prompt = event_dir / "launch-prompt.txt"
+    baseline = event_dir / "scope-baseline.json"
+    log = event_dir / "worker.log"
+    report = event_dir / "report.md"
+
+    event_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        run_checked([
+            sys.executable, str(scripts / "scope_snapshot.py"), "capture",
+            "--root", str(project_root), "--output", str(baseline),
+            "--git-worktree", "--exclude-prefix", "DeepSeekAndDestroy",
+            "--task-contract", str(contract),
+        ])
+        run_checked([
             sys.executable, str(scripts / "render_worker_prompt.py"),
-            "--role", args.role, "--task-id", args.task, "--run-root", str(run_root),
-            "--worker-rules", str(worker_rules), "--task", str(contract),
-            "--report", str(report),
+            "--role", role, "--task-id", args.task_id,
+            "--run-root", str(run_root), "--worker-rules", str(worker_rules),
+            "--task", str(contract), "--report", str(report),
+            *sum((["--input", str(resolve_run_path(run_root, value))] for value in (getattr(args, "input", None) or [])), []),
+            "--output", str(prompt),
+        ])
+
+        cmd = [
+            sys.executable, str(scripts / "run_worker.py"),
+            "--project-root", str(project_root), "--run-root", str(run_root),
+            "--task-id", args.task_id, "--role", role, "--attempt", str(attempt),
+            "--prompt-file", str(prompt), "--task-contract", str(contract),
+            "--worker-rules", str(worker_rules), "--scope-baseline", str(baseline),
+            "--report", str(report), "--event-dir", str(event_dir), "--log", str(log),
+            "--db", str(db), "--model", model,
         ]
-        for evidence in args.evidence:
-            render_cmd += ["--evidence", str(evidence.resolve())]
-        render_cmd += ["--output", str(prompt)]
-        render = run(render_cmd)
-        if render.returncode != 0:
-            raise ValueError((render.stderr or render.stdout).strip() or "worker prompt render failed")
+        if getattr(args, "force_read_only", False):
+            cmd.append("--force-read-only")
+        if args.resume_session:
+            cmd += ["--resume-session", args.resume_session]
+        if args.auto_flag is not None:
+            cmd += [f"--auto-flag={args.auto_flag}"]
+        # Always use the detached low-level monitor so the immutable reservation can
+        # be bound into state immediately. Foreground behavior is implemented by a
+        # cheap wait *after* state binding, not by hiding a long worker inside launch.
+        cmd.append("--detach")
+        cp = subprocess.run(cmd, text=True, capture_output=True, check=False)
+
+        # Reservation is created before worker execution/detach. Bind lifecycle state
+        # even if foreground transport later fails, so recovery sees exact reality.
+        reservation = event_dir / "launch-reservation.json"
+        if reservation.is_file():
+            next_action = (
+                f"wait for {args.phase_id}/{args.task_id} {role} terminal event"
+                if args.detach and not (event_dir / "terminal.json").is_file()
+                else f"classify {args.phase_id}/{args.task_id} {role} terminal event"
+            )
+            state_cmd = [
+                sys.executable, str(scripts / "dsd_state.py"), "bind-attempt",
+                "--run-root", str(run_root), "--phase-id", args.phase_id,
+                "--task-id", args.task_id, "--event-dir", str(event_dir),
+                "--next-action", next_action,
+            ]
+            state_cmd += ["--wait-kind", args.wait_kind or "external-worker-terminal"]
+            if getattr(args, "supersede_incomplete", False):
+                state_cmd.append("--supersede-incomplete")
+            launch_json = cp.stdout.strip() if cp.stdout.strip().startswith("{") else None
+            if launch_json:
+                state_cmd += ["--launch-json", "-"]
+            state_cp = run_checked(state_cmd, input_text=launch_json)
+            state_result = json.loads(state_cp.stdout)
+        else:
+            state_result = None
+            if cp.returncode != 0:
+                # No immutable reservation means the worker never entered the attempt
+                # lifecycle. Remove setup-only artifacts rather than leaving an orphan
+                # directory that looks like recoverable execution evidence.
+                import shutil
+                shutil.rmtree(event_dir, ignore_errors=True)
+                if cp.stderr.strip():
+                    sys.stderr.write(cp.stderr)
+                return cp.returncode
+
+        # Keep premium-facing stdout tiny. Full launcher/state detail is durable on disk.
+        result = {
+            "format": "dsd-attempt-launch-v3",
+            "launcher_exit_code": cp.returncode,
+            "role": role,
+            "attempt": attempt,
+            "event_dir": str(event_dir),
+            "report": str(report),
+            "terminal_event": str(event_dir / "terminal.json"),
+        }
+        rc = cp.returncode
+        if cp.returncode == 0 and not args.detach:
+            wait_cp = subprocess.run([
+                sys.executable, str(scripts / "wait_worker.py"),
+                "--event-dir", str(event_dir),
+            ], text=True, capture_output=True, check=False)
+            try:
+                wait_data = json.loads(wait_cp.stdout) if wait_cp.stdout.strip() else {}
+            except json.JSONDecodeError:
+                wait_data = {}
+            result["wait_status"] = wait_data.get("status")
+            result["worker_exit_code"] = wait_data.get("exit_code")
+            if wait_cp.returncode in {0, 1}:
+                refresh = subprocess.run([
+                    sys.executable, str(scripts / "dsd_state.py"), "bind-attempt",
+                    "--run-root", str(run_root), "--phase-id", args.phase_id,
+                    "--task-id", args.task_id, "--event-dir", str(event_dir),
+                    "--next-action", f"gate {args.phase_id}/{args.task_id} {role} attempt {event_dir}",
+                ], text=True, capture_output=True, check=False)
+                if refresh.returncode != 0:
+                    if refresh.stderr.strip():
+                        sys.stderr.write(refresh.stderr)
+                    return refresh.returncode
+            elif wait_cp.stderr.strip():
+                sys.stderr.write(wait_cp.stderr)
+            rc = wait_cp.returncode
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        return rc
     except Exception:
-        # No immutable reservation exists yet, so pre-launch helper failures should
-        # not burn an attempt number or leave a misleading partial attempt tree.
-        if not (attempt_dir / "launch-reservation.json").exists():
-            shutil.rmtree(attempt_dir, ignore_errors=True)
+        # Pre-reservation setup is safe to clean up. Once reservation exists, preserve
+        # the exact attempt directory for Recovery/audit.
+        if not (event_dir / "launch-reservation.json").exists():
+            import shutil
+            shutil.rmtree(event_dir, ignore_errors=True)
         raise
 
-    cmd = [
-        sys.executable, str(scripts / "run_worker.py"),
-        "--project-root", str(project), "--run-root", str(run_root),
-        "--task-id", args.task, "--role", args.role, "--attempt", str(attempt_no),
-        "--prompt-file", str(prompt), "--task-contract", str(contract),
-        "--worker-rules", str(worker_rules), "--scope-baseline", str(baseline),
-        "--report", str(report), "--event-dir", str(attempt_dir), "--log", str(log),
-        "--db", str(db), "--model", str(model), "--detach",
-    ]
-    if args.resume_session:
-        cmd += ["--resume-session", args.resume_session]
-    launched = run(cmd)
-    if launched.returncode != 0:
-        raise ValueError((launched.stderr or launched.stdout).strip() or "worker launch failed")
-    try:
-        launched_data = json.loads(launched.stdout)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"run_worker returned unreadable launch result: {launched.stdout[:1000]}") from exc
 
-    reservation = Path(launched_data["launch_reservation"]).resolve()
-    bind = run([
-        sys.executable, str(scripts / "dsd_state.py"), "--state", str(args.state.resolve()),
-        "bind-attempt", "--phase", args.phase, "--task", args.task,
-        "--reservation", str(reservation), "--role", args.role, "--attempt", str(attempt_no),
-        "--monitor-pid", str(launched_data["monitor_pid"]), "--liveness", "confirmed",
-        "--next-action", f"wait for {args.phase}/{args.task} {args.role}-{attempt_no} terminal event",
-    ])
-    if bind.returncode != 0:
-        raise ValueError("worker launched but state bind failed; reconcile before further launches: " + (bind.stderr or bind.stdout).strip())
-
-    print(json.dumps({
-        "status": "launched", "phase": args.phase, "task": args.task, "role": args.role,
-        "attempt": attempt_no, "attempt_dir": str(attempt_dir), "report": str(report),
-        "terminal_event": launched_data["terminal_event"], "monitor_pid": launched_data["monitor_pid"],
-    }, indent=2, sort_keys=True))
-    return 0
+def next_gate_path(event_dir: Path) -> Path:
+    base = event_dir / "evidence-gate.json"
+    if not base.exists():
+        return base
+    for i in range(2, 10000):
+        candidate = event_dir / f"evidence-gate-{i:02d}.json"
+        if not candidate.exists():
+            return candidate
+    raise ValueError(f"cannot allocate evidence-gate path under {event_dir}")
 
 
 def gate(args: argparse.Namespace) -> int:
-    state, project, run_root = load_state(args.state)
-    task = task_ref(state, args.phase, args.task)
-    attempt = task.get("current_attempt") or {}
-    if not attempt:
-        raise ValueError(f"{args.phase}/{args.task} has no current_attempt")
-    reservation_path = resolve_state_path(attempt.get("launch_reservation"), project, run_root)
-    reservation = json.loads(reservation_path.read_text(encoding="utf-8"))
-    event_dir = reservation_path.parent
+    run_root = args.run_root.resolve()
+    state = read_json(run_root / "state.json")
+    task = phase_task(state, args.phase_id, args.task_id)
+    project_root = project_root_from_run(run_root, state)
+    if args.event_dir:
+        event_dir = resolve_run_path(run_root, args.event_dir)
+    else:
+        attempt = task.get("current_attempt") or {}
+        event_raw = attempt.get("event_dir")
+        if not isinstance(event_raw, str):
+            raise ValueError("task.current_attempt.event_dir is missing; pass --event-dir for an earlier immutable attempt")
+        event_dir = resolve_run_path(run_root, event_raw)
+    reservation_path = event_dir / "launch-reservation.json"
+    if not reservation_path.is_file():
+        raise ValueError(f"launch reservation missing: {reservation_path}")
+    reservation = read_json(reservation_path)
+    role = str(reservation.get("role") or "")
+    for key in ("task_contract", "report", "scope_baseline", "log"):
+        if not isinstance(reservation.get(key), str):
+            raise ValueError(f"reservation lacks {key}")
+    task_path = resolve_run_path(run_root, reservation["task_contract"])
+    report = resolve_run_path(run_root, reservation["report"])
+    baseline = resolve_run_path(run_root, reservation["scope_baseline"])
+    log = resolve_run_path(run_root, reservation["log"])
     terminal = event_dir / "terminal.json"
     if not terminal.is_file():
-        raise ValueError(f"worker has no terminal event yet: {terminal}")
-
-    report = Path(reservation["report"]).resolve()
-    contract = Path(reservation["task_contract"]).resolve()
-    baseline = Path(reservation["scope_baseline"]).resolve()
-    log = Path(reservation["log"]).resolve()
-    scope_out = free_numbered(event_dir / "scope-diff.json")
-    gate_out = free_numbered(event_dir / "evidence-gate.json")
+        raise ValueError(f"attempt is not terminal yet: {terminal}")
+    output = next_gate_path(event_dir)
     scripts = Path(__file__).resolve().parent
-    cp = run([
+    cmd = [
         sys.executable, str(scripts / "evidence_gate.py"),
-        "--run-root", str(run_root), "--project-root", str(project),
-        "--task", str(contract), "--report", str(report), "--terminal-event", str(terminal),
-        "--log", str(log), "--role", str(reservation["role"]),
-        "--scope-baseline", str(baseline), "--scope-output", str(scope_out),
-        "--output", str(gate_out), "--json",
-    ])
-    if not gate_out.is_file():
-        raise ValueError((cp.stderr or cp.stdout).strip() or "evidence gate produced no artifact")
-    result = json.loads(gate_out.read_text(encoding="utf-8"))
-
-    if result.get("report_recovery_required") and result.get("mechanical_ok"):
-        next_action = f"recover/interpret exact-attempt evidence for {args.phase}/{args.task}"
-    elif not result.get("mechanical_ok"):
-        next_action = f"resolve mechanical failure/recovery for {args.phase}/{args.task}"
-    else:
-        next_action = f"interpret gated {reservation['role']} result for {args.phase}/{args.task}"
-    marked = run([
-        sys.executable, str(scripts / "dsd_state.py"), "--state", str(args.state.resolve()),
-        "mark-attempt", "--phase", args.phase, "--task", args.task,
-        "--status", "process-exited", "--evidence-gate", str(gate_out),
-        "--next-action", next_action,
-    ])
-    if marked.returncode != 0:
-        raise ValueError("evidence gate completed but state update failed: " + (marked.stderr or marked.stdout).strip())
-
-    surface: list[str] = []
-    if result.get("report_state") == "substantive" and report.is_file():
+        "--run-root", str(run_root), "--task", str(task_path), "--report", str(report),
+        "--role", role, "--project-root", str(project_root), "--scope-baseline", str(baseline),
+        "--terminal-event", str(terminal), "--log", str(log), "--output", str(output), "--json",
+    ]
+    cp = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    # Bind the objective gate result into state; no semantic routing is inferred.
+    if output.is_file():
+        next_action = f"route gated {role} attempt {event_dir}"
+        state_cp = subprocess.run([
+            sys.executable, str(scripts / "dsd_state.py"), "bind-gate",
+            "--run-root", str(run_root), "--phase-id", args.phase_id,
+            "--task-id", args.task_id, "--gate", str(output),
+            "--next-action", next_action,
+        ], text=True, capture_output=True, check=False)
+        if state_cp.returncode != 0:
+            if state_cp.stderr.strip(): sys.stderr.write(state_cp.stderr)
+            return state_cp.returncode
+    if cp.stderr.strip():
+        sys.stderr.write(cp.stderr)
+    if cp.stdout.strip():
         try:
-            surface = extract_surface(report, args.max_surface_lines)
-        except (OSError, ValueError):
-            surface = []
-
-    print(json.dumps({
-        "gate_exit": cp.returncode,
-        "evidence_gate": str(gate_out),
-        "mechanical_ok": result.get("mechanical_ok"),
-        "report_recovery_required": result.get("report_recovery_required"),
-        "report": str(report),
-        "report_bytes": result.get("report_bytes"),
-        "decision_surface": surface,
-        "next": (
-            "recover exact-attempt report; do not rerun technical work" if result.get("report_recovery_required") and result.get("mechanical_ok")
-            else "resolve mechanical failure/recovery" if not result.get("mechanical_ok")
-            else "parent interpret compact surface; use Evidence Clerk only if semantic mapping/compression is needed"
-        ),
-    }, indent=2, sort_keys=True))
+            gate_data = json.loads(cp.stdout)
+        except json.JSONDecodeError:
+            sys.stdout.write(cp.stdout)
+        else:
+            surface_lines: list[str] = []
+            if args.surface and gate_data.get("ready_for_interpretation") is True and report.is_file():
+                surface_cp = subprocess.run([
+                    sys.executable, str(scripts / "report_surface.py"),
+                    "--report", str(report), "--json",
+                ], text=True, capture_output=True, check=False)
+                if surface_cp.returncode == 0:
+                    try:
+                        surface_lines = json.loads(surface_cp.stdout).get("surface", [])
+                    except Exception:
+                        surface_lines = []
+            summary = {
+                "format": "dsd-attempt-gate-v2",
+                "integrity_ok": gate_data.get("integrity_ok"),
+                "ready_for_interpretation": gate_data.get("ready_for_interpretation"),
+                "needs_report_recovery": gate_data.get("needs_report_recovery"),
+                "role": gate_data.get("role"),
+                "gate": str(output),
+                "report": gate_data.get("report"),
+                "scope_changed_count": (gate_data.get("scope") or {}).get("changed_count"),
+                "errors": gate_data.get("errors", []),
+                "warnings": gate_data.get("warnings", []),
+            }
+            if args.surface:
+                summary["report_surface"] = surface_lines
+            print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
     return cp.returncode
+
+
+def wait(args: argparse.Namespace) -> int:
+    run_root = args.run_root.resolve()
+    state = read_json(run_root / "state.json")
+    task = phase_task(state, args.phase_id, args.task_id)
+    if args.event_dir:
+        event_dir = resolve_run_path(run_root, args.event_dir)
+    else:
+        raw = (task.get("current_attempt") or {}).get("event_dir")
+        if not isinstance(raw, str):
+            raise ValueError("task.current_attempt.event_dir is missing; pass --event-dir")
+        event_dir = resolve_run_path(run_root, raw)
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "wait_worker.py"), "--event-dir", str(event_dir)]
+    if args.timeout is not None:
+        cmd += ["--timeout", str(args.timeout)]
+    cp = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    if cp.returncode in {0, 1} and (event_dir / "terminal.json").is_file():
+        refresh = subprocess.run([
+            sys.executable, str(Path(__file__).resolve().parent / "dsd_state.py"), "bind-attempt",
+            "--run-root", str(run_root), "--phase-id", args.phase_id,
+            "--task-id", args.task_id, "--event-dir", str(event_dir),
+            "--next-action", f"gate {args.phase_id}/{args.task_id} attempt {event_dir}",
+        ], text=True, capture_output=True, check=False)
+        if refresh.returncode != 0:
+            if refresh.stderr.strip():
+                sys.stderr.write(refresh.stderr)
+            return refresh.returncode
+    if cp.stdout.strip():
+        sys.stdout.write(cp.stdout)
+    if cp.stderr.strip():
+        sys.stderr.write(cp.stderr)
+    return cp.returncode
+
+
+def latest_integrity_gate(event_dir: Path) -> Path:
+    candidates = list(event_dir.glob("evidence-gate*.json"))
+    if not candidates:
+        raise ValueError(f"no integrity gate found under source attempt: {event_dir}")
+    def rank(path: Path) -> tuple[int, str]:
+        m = re.search(r"-(\d+)\.json$", path.name)
+        return (int(m.group(1)) if m else 1, path.name)
+    return max(candidates, key=rank)
+
+
+def interpret(args: argparse.Namespace) -> int:
+    """Launch the standard Evidence Clerk over an exact source attempt.
+
+    This composes paths only. It does not interpret the source report or decide what
+    the Clerk should conclude.
+    """
+    run_root = args.run_root.resolve()
+    state = read_json(run_root / "state.json")
+    task = phase_task(state, args.phase_id, args.task_id)
+    if args.source_event_dir:
+        source_event = resolve_run_path(run_root, args.source_event_dir)
+    else:
+        raw = (task.get("current_attempt") or {}).get("event_dir")
+        if not isinstance(raw, str):
+            raise ValueError("task.current_attempt.event_dir is missing; pass --source-event-dir")
+        source_event = resolve_run_path(run_root, raw)
+    source_gate = resolve_run_path(run_root, args.source_gate) if args.source_gate else latest_integrity_gate(source_event)
+    gate_data = read_json(source_gate)
+    if str(gate_data.get("role") or "").lower() == "evidence-clerk":
+        raise ValueError("Evidence Clerk output routes to the parent; Clerk-of-Clerk interpretation is not a DSD path")
+    if gate_data.get("integrity_ok") is not True or gate_data.get("errors"):
+        raise ValueError("source attempt integrity gate is not clean; Clerk cannot waive integrity failure")
+    if gate_data.get("ready_for_interpretation") is not True:
+        raise ValueError("source report is not available for interpretation; use report recovery/Recovery first")
+    source_report_raw = gate_data.get("report")
+    if not isinstance(source_report_raw, str):
+        raise ValueError("source integrity gate lacks report binding")
+    source_report = resolve_run_path(run_root, source_report_raw)
+    if not source_report.is_file():
+        raise ValueError(f"source report missing: {source_report}")
+
+    launch_args = argparse.Namespace(
+        run_root=run_root, phase_id=args.phase_id, task_id=args.task_id,
+        role="evidence-clerk", attempt=None, worker_rules=args.worker_rules,
+        db=args.db, model=args.model, detach=args.detach, wait_kind=args.wait_kind,
+        resume_session=None, auto_flag=args.auto_flag,
+        input=[str(source_report), str(source_gate)], force_read_only=True,
+        supersede_incomplete=False,
+    )
+    return launch(launch_args)
 
 
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="command", required=True)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--run-root", type=Path, required=True)
+    common.add_argument("--phase-id", required=True)
+    common.add_argument("--task-id", required=True)
 
-    l = sub.add_parser("launch", help="capture baseline, render prompt, reserve/launch worker, bind state")
-    l.add_argument("--state", type=Path, required=True)
-    l.add_argument("--phase", required=True); l.add_argument("--task", required=True)
+    l = sub.add_parser("launch", parents=[common], help="derive attempt paths, capture baseline, render prompt, launch OpenCode, and bind state")
     l.add_argument("--role", choices=sorted(ROLE_NAMES), required=True)
-    l.add_argument("--db", type=Path); l.add_argument("--model"); l.add_argument("--resume-session")
-    l.add_argument("--evidence", type=Path, action="append", default=[], help="prior immutable run evidence needed by this worker")
+    l.add_argument("--attempt", type=int, help="normally omitted; next per-role attempt number is derived")
+    l.add_argument("--worker-rules", help="override state.worker_rules.path")
+    l.add_argument("--db", help="override state.worker_runtime.opencode.run_db")
+    l.add_argument("--model", help="override state.worker_runtime.model")
+    l.add_argument("--detach", action="store_true")
+    l.add_argument("--wait-kind")
+    l.add_argument("--resume-session", help="same-role continuation only")
+    l.add_argument("--auto-flag", default="--auto", help="OpenCode permission flag; pass empty string to omit")
+    l.add_argument("--input", action="append", default=[], help="additional exact run artifact input supplied to this worker")
+    l.add_argument("--force-read-only", action="store_true", help="reserve attempt as project-read-only regardless of task write scope")
+    l.add_argument("--supersede-incomplete", action="store_true", help="exceptional recovery: archive a terminal-less prior attempt as lifecycle-incomplete before binding the new attempt; never use while the old worker may still write")
 
-    g = sub.add_parser("gate", help="gate the current attempt mechanically and show a bounded report surface")
-    g.add_argument("--state", type=Path, required=True)
-    g.add_argument("--phase", required=True); g.add_argument("--task", required=True)
-    g.add_argument("--max-surface-lines", type=int, default=20)
+    i = sub.add_parser("interpret", parents=[common], help="launch an Evidence Clerk over one mechanically clean source attempt without authoring another Clerk contract")
+    i.add_argument("--source-event-dir", help="source attempt directory; defaults to task.current_attempt.event_dir")
+    i.add_argument("--source-gate", help="source integrity gate; defaults to latest evidence-gate*.json in source event dir")
+    i.add_argument("--worker-rules", help="override state.worker_rules.path")
+    i.add_argument("--db", help="override state.worker_runtime.opencode.run_db")
+    i.add_argument("--model", help="override state.worker_runtime.model")
+    i.add_argument("--detach", action="store_true")
+    i.add_argument("--wait-kind")
+    i.add_argument("--auto-flag", default="--auto")
+
+    w = sub.add_parser("wait", parents=[common], help="quiescently wait for the current attempt terminal event")
+    w.add_argument("--event-dir", help="optional run-relative/absolute immutable attempt directory")
+    w.add_argument("--timeout", type=float, help="optional helper timeout; omission uses wait_worker default")
+
+    g = sub.add_parser("gate", parents=[common], help="verify objective integrity for the task's current terminal attempt, or an explicitly named earlier attempt")
+    g.add_argument("--event-dir", help="optional run-relative/absolute immutable attempt directory")
+    g.add_argument("--surface", action="store_true", help="also return a bounded non-semantic report prefix for a parent decision boundary")
     return ap
 
 
 def main() -> int:
     args = parser().parse_args()
+    if not args.run_root.is_absolute():
+        print("ERROR: --run-root must be absolute", file=sys.stderr)
+        return 2
     try:
-        return launch(args) if args.command == "launch" else gate(args)
-    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
-        return fail(str(exc))
+        if args.command == "launch":
+            return launch(args)
+        if args.command == "interpret":
+            return interpret(args)
+        if args.command == "wait":
+            return wait(args)
+        return gate(args)
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

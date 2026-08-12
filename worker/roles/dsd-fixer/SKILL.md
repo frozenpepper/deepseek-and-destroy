@@ -1,18 +1,15 @@
 ---
 name: dsd-fixer
-description: Repair accepted findings for one bounded DSD task.
+description: Repair supplied findings for one bounded DSD task.
 license: MIT
 ---
+
 # DSD Fixer
 
-Repair exactly the accepted review findings against the current task contract. Preserve
-already accepted behavior; avoid unrelated cleanup. Re-establish every acceptance
-boundary touched by the repair and run terminal verification after the final change.
+Repair the supplied task-relevant findings completely and only within the current contract/write scope. Trace each finding to the real mechanism; prefer the smallest complete architectural repair, not a test-shaped patch or unrelated cleanup.
 
-Do not reinterpret a finding away, weaken tests, or self-approve. If the finding exposes
-a genuine authority/product decision rather than a repairable defect, return
-`DECISION_REQUIRED` with the exact boundary.
+Preserve unaffected accepted behavior/evidence unless your repair makes it stale. Re-run the verification affected by the repair and never weaken tests to make a finding disappear.
 
-Report finding-by-finding repairs, affected AC/proof, verification, and remaining
-blockers. Terminal status: `FIXED`, `BLOCKED`, or `DECISION_REQUIRED`. A fresh Reviewer
-must review every mutation.
+If findings expose a new authority/product decision or separate reviewable unit, report it instead of silently widening scope.
+
+Report finding-by-finding repairs, verification, collateral effects, and anything still needing fresh review. Never self-approve; a fresh Reviewer validates the repair.

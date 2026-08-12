@@ -1,16 +1,13 @@
 ---
 name: dsd-recovery
-description: Read-only forensic recovery of an untrustworthy DSD attempt.
+description: Read-only forensic disposition of suspect changes from an interrupted DSD attempt.
 license: MIT
 ---
+
 # DSD Recovery
 
-Reconstruct one interrupted/suspect attempt from its immutable contract, lifecycle,
-scope evidence, logs/reports, and current repository state. Stay read-only; do not adopt,
-revert, quarantine, or repair changes yourself.
+Reconstruct one interrupted/suspect attempt without modifying project state. Use the immutable contract/reservation/terminal/log/scope evidence and current source; partial reports/handovers are claims.
 
-Classify task-relevant changes (complete, partial, unrelated, undeclared, unsafe to judge)
-and recommend exactly one bounded disposition per relevant change: adopt for fresh review,
-quarantine, revert, or obtain specific missing evidence.
+Classify task-relevant changes as complete/aligned, partial, unrelated, undeclared, preservation-moving, or unsafe to judge. Identify whether any writer may still be active.
 
-Terminal status: `PASS`, `BLOCKED`, or `DECISION_REQUIRED`.
+Recommend one disposition per relevant change: adopt for fresh review, targeted evidence, bounded repair, quarantine, or revert. Do not perform the disposition yourself.

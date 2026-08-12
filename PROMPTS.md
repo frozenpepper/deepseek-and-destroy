@@ -1,65 +1,97 @@
-# DSD Contracts / Handoffs Reference
+# DSD Task Specs and Worker Handoffs
 
-Normally use `render_task_contract.py --spec` and `dsd_attempt.py`; load this file only
-when authoring/debugging a contract or exceptional handoff.
+Cold reference. Normal parent operation should use the high-level helpers rather than recompose launch mechanics manually.
 
-## Contract
+## Semantic task spec
 
-A contract contains only the **changing semantic surface** of one bounded task. Omit
-unused fields. Typical JSON:
+Author one small JSON object and render it:
+
+```bash
+python3 <skill>/scripts/render_task_contract.py --spec <spec.json>
+```
+
+Typical spec:
 
 ```json
 {
+  "run_root": "/abs/project/DeepSeekAndDestroy/plans/p/runs/r",
+  "phase_id": "phase-4",
   "task_id": "U17",
-  "revision": 3,
-  "output": "phases/phase-2/U17/contracts/r0003.md",
-  "unit": "Persist canonical media state",
+  "title": "Persist canonical media state",
   "objective": "Persist canonical media selection across a real restart.",
-  "authority": ["/abs/project/docs/architecture.md"],
-  "input": ["/abs/run/.../discovery/report.md"],
-  "write_path": ["src/media", "tests/media"],
+  "authority": ["docs/architecture.md"],
+  "inputs": ["DeepSeekAndDestroy/.../discovery.md"],
+  "write_paths": ["src/media", "tests/media"],
+  "extra_inventory": [".runtime/media"],
   "acceptance": [
-    "AC-001 — selection survives a fresh-process restart.",
-    "AC-002 — invalid persisted media fails closed."
+    "selected media survives a fresh-process restart",
+    "invalid persisted media fails closed to the canonical fallback"
   ],
-  "proof": ["AC-001 — fresh instance must reconstruct exact identity."],
-  "proof_pattern": ["DURABILITY"],
-  "verification": ["npm test -- media"],
-  "extra_inventory": ["runtime/locks"]
+  "proof_patterns": ["DURABILITY", "NEGATIVE-GATE"],
+  "verification": ["npm test -- media"]
 }
 ```
 
-`DSD_RUN_ROOT` may supply `run_root`; relative `output` resolves beneath it. Authority,
-input, and mechanical evidence paths are absolute. `write_path`/`extra_inventory` are
-project-relative. `Allowed source changes` is always explicit (`NONE` when read-only).
-Every semantic acceptance entry begins with stable `AC-*`.
+Keep only task-specific facts. Empty optional fields may be omitted. `write_paths` is explicit because it is a mechanical project-write boundary; an empty/missing list means no project writes. `extra_inventory` names ignored but load-bearing project roots whose movement must be tracked mechanically.
 
-Useful optional keys: `risk` (max 3), `expected_scope`, `excluded`, `mechanical`,
-`task_output`, `major_log`, `progress_file`, `evidence_dir`. Legacy CLI slots remain for
-compatibility; do not serialize a large contract into CLI arguments when JSON works.
+Acceptance/proof text guides capable workers and reviewers; Python does not parse it to judge engineering success. `AC-*` labels are optional readability aids and are assigned automatically when absent.
 
-A launched revision is immutable. Material changes to scope/AC/authority create the next
-numbered revision. Role changes normally reuse the same semantic contract; pass prior
-attempt evidence as launch evidence rather than rewriting the contract solely to carry a
-report path.
+There is no task-level `Evidence Clerk Checks` field. Clerk is chosen on demand at a semantic consumption boundary, not recursively encoded in the technical task.
 
-## Launch evidence
+A contract revision becomes immutable at first launch. Material changes to semantic authority/scope/acceptance create a new numbered revision.
 
-`dsd_attempt.py launch --evidence <path>` adds an immutable prior-evidence file to the
-tiny launch handoff. Its path + SHA-256 are embedded in the immutable prompt. Use this
-for Reviewer/Fixer/Clerk/Recovery handoffs when they need a specific prior report/gate.
-Evidence is not governing authority.
+## Worker-rules snapshot
 
-## Worker prompt
+A run revision contains:
 
-`render_worker_prompt.py` emits only exact paths to: run rules, Common, one role skill,
-task contract, optional prior evidence, assigned report, and (only when named by the
-contract) the proof-recipe library. Do not restate manuals/project history in chat.
+```text
+WORKER_RULES.md                         # run facts/run-specific constraints
+MANIFEST.json                           # cryptographic snapshot binding
+protocol/COMMON.md                     # universal worker rules
+protocol/roles/dsd-<role>/SKILL.md     # specialist doctrine
+protocol/PROOF-PATTERNS.md              # optional recipe library
+```
+
+`WORKER_RULES.md` must not duplicate Common/role doctrine or changing task content.
+
+## Tiny launch handoff
+
+`render_worker_prompt.py`/`dsd_attempt.py launch` creates the handoff. Conceptually:
+
+```text
+DSD <ROLE> for <task>.
+Read and obey:
+1. <rules>/WORKER_RULES.md
+2. <rules>/protocol/COMMON.md
+3. <rules>/protocol/roles/dsd-<role>/SKILL.md
+4. <task-contract>
+5. <rules>/protocol/PROOF-PATTERNS.md   # only when the task names proof recipes
+Prior evidence: <exact immutable paths/hashes, only when needed>
+Report: <attempt>/report.md
+```
+
+Do not inline manuals, prior reports, or project history. Role selection is explicit; native skill discovery is not production authority. A role change gets a fresh session.
 
 ## Worker report
 
-Worker reports are prose evidence, not a wire protocol. Ask for concise conclusion,
-work/findings, verification, AC/proof coverage when applicable, defects/uncertainty, and
-evidence paths. `Verdict: <role status>` is useful but not a mechanical acceptance
-requirement. A long/awkward report can be interpreted by Evidence Clerk; missing proof
-cannot be normalized into existence.
+The report is natural technical evidence for another capable model, not a machine wire format. Ask for the conclusion first, then what was done/checked, decisive evidence, verification actually performed, defects/uncertainty/decision boundaries, and useful evidence paths.
+
+No exact `Verdict:` line, finality token, Decision Packet, Proof Matrix grammar, AC-string repetition, defect section, or test-count syntax is required for mechanical acceptance.
+
+If the bounded report surface is insufficient for the parent, use one read-only Evidence Clerk to interpret existing evidence. Missing technical proof goes to targeted Verification/Review, not report-format repair.
+
+## Normal lifecycle
+
+```bash
+python3 <skill>/scripts/dsd_state.py bind-contract ...
+python3 <skill>/scripts/dsd_attempt.py launch ...
+# detached only: dsd_attempt.py wait ...
+python3 <skill>/scripts/dsd_attempt.py gate ...              # mechanics only
+# parent decision boundary only: add --surface
+# optional only when semantic compression is useful:
+python3 <skill>/scripts/dsd_attempt.py interpret ...
+# then gate that Clerk attempt like any other worker
+python3 <skill>/scripts/dsd_state.py accept-task ...
+```
+
+These helpers derive mechanical paths/state. The parent still chooses task semantics, role, routing, and acceptance.

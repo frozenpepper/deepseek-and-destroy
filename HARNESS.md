@@ -1,12 +1,22 @@
-# DSD Parent Harness Router
+# DSD — Parent Harness Routing
 
-Load exactly one parent adapter only when host-specific waiting/continuity is needed:
-`CLAUDE.md`, `CODEX.md`, `KILO.md`, or the OpenCode/generic notes in `OPENCODE.md`.
-The default technical worker remains external OpenCode + DeepSeek regardless of parent.
+Cold routing reference.
 
-Universal invariant: waiting is quiescent. A host/tool wait timeout with no exact
-`terminal.json` is a non-event—wait again without polling logs/CPU/repository or spending
-a model turn diagnosing liveness. Process/transport errors trigger recovery/availability;
-semantic worker outcomes are interpreted only after the mechanical gate.
+Parent harness and worker harness are independent. Default technical workers are external OpenCode/DeepSeek even when the premium parent is Codex, Claude Code, Kilo, or OpenCode.
 
-Compaction is separate from worker waiting; load `COMPACTION.md` only when needed.
+Prefer explicit harness configuration/session identity; use `detect_harness.py` only as a conservative hint. Load exactly one parent adapter:
+
+- `CODEX.md`
+- `CLAUDE.md`
+- `KILO.md`
+- `OPENCODE.md` when OpenCode is also the parent
+
+Universal invariant: waiting is quiescent. External workers wake on exact `terminal.json`; supported native workers finalize the same DSD lifecycle when their native Task returns. Transport completion never implies semantic PASS.
+
+Install only the selected project-local continuity adapter:
+
+```bash
+python3 <skill>/scripts/install_harness_adapter.py --project-root <project> --harness <codex|claude-code|opencode|kilo>
+```
+
+Load `COMPACTION.md` only when checkpoint/resume behavior is relevant.

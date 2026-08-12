@@ -131,9 +131,7 @@ def main() -> int:
             shutil.copyfile(source, dest)
 
         rules = [
-            "The launcher fixes the worker working directory to PROJECT ROOT. Do not change directory merely to compensate for a path mistake.",
-            "Use the exact project/run/report paths supplied by this rules revision and immutable launch/task authority; do not invent a parallel run tree.",
-            "Do not place credentials, secrets, or private chain-of-thought in reports/logs.",
+            "Launcher working directory is PROJECT ROOT; use the exact supplied run/report paths.",
         ]
         rules.extend(args.rule)
 
@@ -154,12 +152,12 @@ def main() -> int:
         if instructions:
             text.extend(f"- `{p}`" for p in instructions)
         else:
-            text.append("- NONE RECORDED — the orchestrator must not omit applicable project authority at intake.")
+            text.append("- NONE")
         if rules:
             text += ["", "## Run-specific rules", *[f"- {rule}" for rule in rules]]
         text += [
             "",
-            "Universal worker behavior lives in the immutable COMMON.md selected by the launch prompt; role behavior lives only in the exact role SKILL.md selected by that prompt. This file intentionally contains run facts, not a duplicate worker manual.",
+            "Universal behavior is in COMMON.md; specialist behavior is in the exact selected role SKILL.md.",
             "",
         ]
         tmp_output = tmp_root / "WORKER_RULES.md"

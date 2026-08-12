@@ -1,31 +1,34 @@
-# DSD — Kilo Code Parent / Native Worker Adapter
+# DSD — Kilo Code Parent Adapter
 
-Load only when the premium parent runs in Kilo or the run explicitly selects Kilo-native
-workers. Default workers otherwise remain external OpenCode.
+Load this only when the **premium parent** runs in Kilo Code. The default technical-worker backend remains external OpenCode/DeepSeek; parent harness and worker backend are independent.
 
-Install parent continuity integration when needed:
+## Parent continuity
 
-```bash
-python3 <skill-root>/scripts/install_harness_adapter.py --harness kilo --project-root <project-root>
-```
-
-For optional native workers install the two capability wrappers:
+Install the project-local adapter:
 
 ```bash
-python3 <skill-root>/scripts/install_kilo_workers.py --project-root <project-root>
+python3 <skill>/scripts/install_harness_adapter.py \
+  --harness kilo --project-root <project> --skill-root <skill>
 ```
 
-Choose wrapper by **actual immutable write capability**, not role name:
+It installs `.kilo/plugin/dsd-compaction.ts` plus DSD checkpoint helpers. Reload Kilo after installation. The plugin prepares durable DSD state before native compaction; `context_checkpoint.py verify-resume` remains authority before new project work. If plugin loading is uncertain, use the manual/fresh-session path in `COMPACTION.md`.
 
-- mutating: Implementer/Fixer; Verification only when `Allowed source changes` is nonempty;
-- read-only: Reviewer, Discovery, Phase Surveyor, Recovery, Phase Auditor, all Evidence
-  Clerks, and read-only Verification.
+## Normal DSD workers
 
-Native Task calls must still use `native_worker_attempt.py reserve` before invocation and
-`finalize` immediately after the Task returns, then the normal mechanical evidence gate.
-The native Task return is the terminal boundary; semantic FAIL is still completed
-transport. Never fabricate completion while the subagent is live.
+Unless configuration explicitly selects Kilo-native workers, use the ordinary high-level external path from `SKILL.md`:
 
-Role changes start fresh native sessions. Read-only wrappers deny project edits; the DSD
-scope gate independently catches shell/write-channel drift. For compaction load
-`COMPACTION.md`; for external OpenCode workers load `OPENCODE.md` only on transport issues.
+```text
+dsd_attempt.py launch → quiescent wait when detached → dsd_attempt.py gate
+```
+
+Do not reimplement OpenCode launch mechanics in Kilo parent context.
+
+## Optional Kilo-native workers
+
+If the run explicitly selects Kilo-native subagents, load **only then**:
+
+`adapters/kilo/README.md`
+
+That cold document owns subagent installation, mutating/read-only wrappers, and native reserve/finalize lifecycle. Native workers must still enter the same immutable DSD scope/evidence gate; they do not bypass it.
+
+Role changes are fresh contexts. Evidence Clerk is always project-read-only. Verification gets the mutating wrapper only when the exact task contract authorizes generated/project writes.

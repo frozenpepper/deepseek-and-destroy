@@ -1,0 +1,26 @@
+{
+  "run_root": "/absolute/project/DeepSeekAndDestroy/plans/example/runs/run-001",
+  "phase_id": "phase-1",
+  "task_id": "U1",
+  "title": "One bounded behavior",
+  "objective": "Implement and prove one independently reviewable behavior.",
+  "authority": [
+    "docs/plan.md"
+  ],
+  "inputs": [],
+  "write_paths": [
+    "src/example",
+    "tests/example"
+  ],
+  "extra_inventory": [],
+  "acceptance": [
+    "The intended production path exhibits the required behavior.",
+    "A relevant negative/counterexample path fails safely."
+  ],
+  "proof_obligations": [],
+  "proof_patterns": [],
+  "verification": [
+    "<targeted verification command>"
+  ],
+  "risks": []
+}

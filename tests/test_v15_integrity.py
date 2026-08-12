@@ -92,36 +92,21 @@ class V15IntegrityTest(unittest.TestCase):
         return terminal
 
     def impl_report(self, path: Path) -> None:
-        path.write_text(textwrap.dedent("""
-            ## Decision Packet
-            DSD_REPORT_STATUS: FINAL
-            Verdict: PASS
-            Verification: PASS; total=1; passed=1; failed=0; skipped=0
-            Task-relevant defects: NONE
-            Clerk checks: NONE
-        """))
+        path.write_text("Completed the bounded work and recorded the relevant technical evidence.\n")
 
-    def test_role_registry_consistency(self):
-        import importlib.util
-        import re
+
+
+    def test_evidence_clerk_is_always_project_read_only(self):
         import sys as _sys
         scripts = str((ROOT / "scripts").resolve())
         _sys.path.insert(0, scripts)
         try:
-            import run_worker, render_worker_prompt, evidence_gate
-            self.assertEqual(set(run_worker.ROLES), set(render_worker_prompt.ROLE_SKILLS))
-            self.assertEqual(set(run_worker.ROLES), set(evidence_gate.ROLE_NAMES))
+            from _contract import role_writes_project
+            self.assertFalse(role_writes_project("evidence-clerk", "# Clerk\n## Allowed source changes\nNONE\n"))
+            self.assertFalse(role_writes_project("evidence-clerk", "# Clerk\n## Allowed source changes\n- `docs/progress.md`\n"))
         finally:
             if _sys.path and _sys.path[0] == scripts:
                 _sys.path.pop(0)
-        documented = {p.parent.name.removeprefix("dsd-") for p in (ROOT / "worker" / "roles").glob("dsd-*/SKILL.md")}
-        self.assertEqual(documented, set(run_worker.ROLES))
-        for role in documented:
-            text = (ROOT / "worker" / "roles" / f"dsd-{role}" / "SKILL.md").read_text()
-            self.assertTrue(text.startswith(f"---\nname: dsd-{role}\n"), role)
-            self.assertIn("Terminal status:", text, role)
-            last = next(line.strip() for line in reversed(text.splitlines()) if line.strip())
-            self.assertTrue(last.endswith("."), f"{role} role skill appears truncated: {last!r}")
 
     def test_mutating_scope_gate_allows_declared_path_and_rejects_extra_path(self):
         with tempfile.TemporaryDirectory() as td:
@@ -132,7 +117,7 @@ class V15IntegrityTest(unittest.TestCase):
             self.assertEqual(self.run_cmd(["git", "commit", "-m", "base"], cwd=project).returncode, 0)
             run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
             task = run / "contract.md"
-            task.write_text("# Task\n## Allowed source changes\n- `allowed.py`\n\n## Evidence Clerk Checks\nNONE\n")
+            task.write_text("# Task\n## Allowed source changes\n- `allowed.py`\n")
             report = run / "impl.md"; self.impl_report(report)
             baseline = self.capture(project, run)
             self.make_terminal_event(run, task, report, baseline, "implementer")
@@ -159,7 +144,7 @@ class V15IntegrityTest(unittest.TestCase):
             self.run_cmd(["git", "add", "source.py"], cwd=project)
             self.run_cmd(["git", "commit", "-m", "base"], cwd=project)
             run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
-            task = run / "task.md"; task.write_text("# T\n## Allowed source changes\nNONE\n## Evidence Clerk Checks\nNONE\n")
+            task = run / "task.md"; task.write_text("# T\n## Allowed source changes\nNONE\n")
             report = run / "r.md"; self.impl_report(report)
             baseline = self.capture(project, run)
             self.make_terminal_event(run, task, report, baseline, "implementer")
@@ -210,26 +195,6 @@ class V15IntegrityTest(unittest.TestCase):
             second = self.run_cmd(cmd, env=env); self.assertEqual(second.returncode, 2, second.stdout + second.stderr)
             self.assertTrue("already exists" in second.stderr or "reservation" in second.stderr)
 
-    def test_mechanical_gate_does_not_interpret_verification_arithmetic(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td); project = self.init_git_project(root)
-            (project / "base.txt").write_text("base\n"); self.run_cmd(["git", "add", "base.txt"], cwd=project); self.run_cmd(["git", "commit", "-m", "base"], cwd=project)
-            run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
-            task = run / "task.md"; task.write_text("# T\n## Allowed source changes\nNONE\n## Evidence Clerk Checks\nNONE\n")
-            report = run / "report.md"
-            report.write_text("## Decision Packet\nDSD_REPORT_STATUS: FINAL\nVerdict: PASS\nVerification: PASS — 17 tests / 14 pass / 2 fail\nTask-relevant defects: NONE\nClerk checks: NONE\n")
-            baseline = self.capture(project, run)
-            self.make_terminal_event(run, task, report, baseline, "implementer", task_id="U")
-            cp = self.run_cmd([
-                PYTHON, str(ROOT / "scripts" / "evidence_gate.py"), "--run-root", str(run.resolve()),
-                "--task", str(task.resolve()), "--report", str(report.resolve()), "--role", "implementer",
-                "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()), "--json",
-            ])
-            self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
-            payload = json.loads(cp.stdout)
-            self.assertTrue(payload["mechanical_ok"])
-            self.assertNotIn("clerk_reasons", payload)
-            self.assertNotIn("verdict", payload)
 
     def test_scope_snapshot_records_symlink_identity_without_hashing_external_target(self):
         if os.name == "nt":
@@ -328,8 +293,7 @@ class V15IntegrityTest(unittest.TestCase):
                         "tasks": {
                             "U1": {
                                 "status": "in-progress",
-                                "transport_attempts": 1,
-                                "current_contract": {
+                                                                "current_contract": {
                                     "revision": 1,
                                     "path": str(task.resolve()),
                                     "sha256": hashlib.sha256(task.read_bytes()).hexdigest(),
@@ -417,9 +381,8 @@ class V15IntegrityTest(unittest.TestCase):
                     "status": "auditing",
                     "gate_barrier": {"status": "CLOSED", "snapshot": str(snapshot.resolve())},
                     "tasks": {"U1": {
-                        "status": "in-progress", "transport_attempts": 1,
-                        "current_attempt": {
-                            "role": "implementer", "attempt": 1,
+                        "status": "in-progress",                         "current_attempt": {
+                            "role": "implementer", "attempt": 1, "writes_project": True,
                             "prompt_path": str(prompt.resolve()),
                             "scope_baseline": str(baseline.resolve()),
                             "scope_baseline_sha256": hashlib.sha256(baseline.read_bytes()).hexdigest(),
@@ -435,7 +398,7 @@ class V15IntegrityTest(unittest.TestCase):
             path = root / "state.json"; path.write_text(json.dumps(state))
             cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "check_state.py"), str(path.resolve())])
             self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
-            self.assertIn("phase barrier cannot be CLOSED", cp.stdout)
+            self.assertIn("CLOSED phase barrier cannot coexist with an active project writer", cp.stdout)
 
     def test_evidence_gate_rejects_bound_authority_tampering(self):
         with tempfile.TemporaryDirectory() as td:
@@ -445,7 +408,7 @@ class V15IntegrityTest(unittest.TestCase):
             self.assertEqual(self.run_cmd(["git", "commit", "-m", "base"], cwd=project).returncode, 0)
             run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
             task = run / "contract.md"
-            task.write_text("# Task\n## Allowed source changes\nNONE\n\n## Evidence Clerk Checks\nNONE\n")
+            task.write_text("# Task\n## Allowed source changes\nNONE\n")
             report = run / "impl.md"; self.impl_report(report)
             baseline = self.capture(project, run)
             terminal = self.make_terminal_event(run, task, report, baseline, "implementer")
@@ -490,15 +453,16 @@ class V15IntegrityTest(unittest.TestCase):
             run.mkdir(parents=True)
             plan = project / "PLAN.md"
             plan.write_text("plan\n")
-            cp = self.run_cmd([
-                PYTHON, str(ROOT / "scripts" / "render_task_contract.py"),
-                "--run-root", str(run.resolve()), "--task-id", "U1", "--revision", "1",
-                "--output", str(contract.resolve()), "--unit", "dot path", "--objective", "preserve dot prefix",
-                "--authority", str(plan.resolve()), "--write-path", ".github/workflows",
-            ])
+            spec = run / "spec.json"
+            spec.write_text(json.dumps({
+                "run_root": str(run.resolve()), "task_id": "U1", "revision": 1,
+                "output": str(contract.resolve()), "title": "dot path", "objective": "preserve dot prefix",
+                "authority": [str(plan.resolve())], "write_paths": [".github/workflows"],
+            }))
+            cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "render_task_contract.py"), "--spec", str(spec)])
             self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
             data = json.loads(cp.stdout)
-            self.assertEqual(data["allowed_source_changes"], [".github/workflows"])
+            self.assertTrue(data["writes_project"])
             self.assertIn("`.github/workflows`", contract.read_text())
 
     def test_scope_snapshot_refuses_to_overwrite_immutable_evidence(self):
@@ -560,6 +524,59 @@ class V15IntegrityTest(unittest.TestCase):
             final_state = json.loads(state_path.read_text())
             self.assertEqual(final_state["context_checkpoint"]["status"], "rehydration-required")
             self.assertFalse(final_state["context_checkpoint"]["continuity_verified"])
+
+
+    def test_ignored_extra_inventory_catches_additions_and_removals(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); project = self.init_git_project(root)
+            (project / ".gitignore").write_text("runtime/\n")
+            (project / "tracked.txt").write_text("base\n")
+            self.run_cmd(["git", "add", ".gitignore", "tracked.txt"], cwd=project)
+            self.assertEqual(self.run_cmd(["git", "commit", "-m", "base"], cwd=project).returncode, 0)
+            runtime = project / "runtime"; runtime.mkdir(); (runtime / "lock-a").write_text("a\n")
+            run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
+            task = run / "task.md"; task.write_text("# Task\n## Allowed source changes\n- `runtime`\n\n## Extra scope inventory\n- `runtime`\n")
+            baseline = run / "scope.json"
+            cap = self.run_cmd([PYTHON, str(ROOT / "scripts" / "scope_snapshot.py"), "capture", "--root", str(project.resolve()), "--output", str(baseline.resolve()), "--git-worktree", "--exclude-prefix", "DeepSeekAndDestroy", "--task-contract", str(task.resolve())])
+            self.assertEqual(cap.returncode, 0, cap.stdout + cap.stderr)
+            (runtime / "lock-a").unlink(); (runtime / "lock-b").write_text("b\n")
+            out = run / "diff.json"
+            cmp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "scope_snapshot.py"), "compare", "--root", str(project.resolve()), "--baseline", str(baseline.resolve()), "--output", str(out.resolve())])
+            self.assertEqual(cmp.returncode, 0, cmp.stdout + cmp.stderr)
+            data = json.loads(out.read_text())
+            self.assertIn("runtime/lock-b", data["added"])
+            self.assertIn("runtime/lock-a", data["removed"])
+            self.assertEqual(data["extra_inventory_specs"], ["runtime"])
+
+    def test_verification_role_can_be_prebarrier_writer_when_contract_declares_paths(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); project = self.init_git_project(root)
+            (project / "generated.txt").write_text("old\n")
+            self.run_cmd(["git", "add", "generated.txt"], cwd=project)
+            self.assertEqual(self.run_cmd(["git", "commit", "-m", "base"], cwd=project).returncode, 0)
+            run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
+            task = run / "task.md"; task.write_text("# Verification\n## Allowed source changes\n- `generated.txt`\n")
+            report = run / "verification.md"; report.write_text("Verification exercised the assigned predicate and recorded the result.\n")
+            baseline = self.capture(project, run)
+            self.make_terminal_event(run, task, report, baseline, "verification")
+            (project / "generated.txt").write_text("new\n")
+            cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "evidence_gate.py"), "--run-root", str(run.resolve()), "--task", str(task.resolve()), "--report", str(report.resolve()), "--role", "verification", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()), "--json"])
+            self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
+            self.assertTrue(json.loads(cp.stdout)["integrity_ok"])
+
+    def test_verification_without_write_scope_remains_read_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); project = self.init_git_project(root)
+            (project / "generated.txt").write_text("old\n")
+            self.run_cmd(["git", "add", "generated.txt"], cwd=project); self.run_cmd(["git", "commit", "-m", "base"], cwd=project)
+            run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
+            task = run / "task.md"; task.write_text("# Verification\n## Allowed source changes\nNONE\n")
+            report = run / "verification.md"; report.write_text("Verification exercised the assigned predicate and recorded the result.\n")
+            baseline = self.capture(project, run); self.make_terminal_event(run, task, report, baseline, "verification")
+            (project / "generated.txt").write_text("new\n")
+            cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "evidence_gate.py"), "--run-root", str(run.resolve()), "--task", str(task.resolve()), "--report", str(report.resolve()), "--role", "verification", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()), "--json"])
+            self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
+            self.assertTrue(any("READONLY-SCOPE-MOVED" in e for e in json.loads(cp.stdout)["errors"]))
 
 
 

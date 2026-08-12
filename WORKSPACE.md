@@ -1,168 +1,136 @@
-# DSD Workspace / Recovery Reference
+# DSD Workspace Contract
 
-Load this only for state, provenance, recovery, or phase-barrier work. `SKILL.md` owns
-normal execution policy.
+Cold reference for state/evidence/recovery/concurrency/barriers. Normal tasks use `dsd_attempt.py` without repeatedly loading this file.
 
-## Durable layout
+## Run layout
 
 ```text
-DeepSeekAndDestroy/plans/<plan>/runs/<run>/
+DeepSeekAndDestroy/plans/<plan-id>/runs/<run-id>/
+  manifest.json
   state.json
-  run-manifest.md
+  plan-reference.md
   authority-index.json
-  plan/...
-  worker-rules/rNNNN/{WORKER_RULES.md,MANIFEST.json,protocol/...}
+  effective-configuration.md
+  HANDOVER.md
   major-findings-and-fixes.md
-  phases/<phase>/<task>/
-    contracts/rNNNN.md
-    attempts/<role>-<n>/
-      prompt.txt
-      scope-baseline.json
-      launch-reservation.json
-      attempt.json
-      report.md
-      worker.log
-      terminal.json
-      scope-diff.json
-      evidence-gate.json
-  compactions/...
+  worker-rules/rNNNN/{WORKER_RULES.md,MANIFEST.json,protocol/...}
+  phases/<phase>/
+    phase-snapshot-*.json
+    tasks/<task>/
+      contracts/rNNNN.md
+      attempts/<role>-<n>/
+        launch-prompt.txt
+        report.md
+        worker.log
+        scope-baseline.json
+        scope-diff.json
+        launch-reservation.json
+        attempt.json
+        terminal.json
+        evidence-gate.json
 ```
 
-New attempts are self-contained. Historical v15 layouts with role reports outside the
-attempt directory remain readable by low-level helpers.
+New attempt evidence is self-contained. Run files are orchestration evidence, not project source.
 
-OpenCode worker databases live outside the project tree (`OPENCODE.md`). Run namespaces
-prevent DSD-artifact collisions; concurrent project writers still need disjoint ownership
-or separate worktrees.
+## Authority / immutability
 
-## Mutability / authority
+Current user instructions and governing project/plan authority define semantics. `state.json` records execution reality; immutable task/rules/attempt/gate artifacts prove what actually ran. HANDOVER/chat/progress are continuity aids only.
 
-Mutable control: `state.json`, current HANDOVER/continuity prose, current contract only
-before first launch. Append-oriented: major findings/out-of-scope defect logs. Immutable
-after launch/terminal as applicable: snapshotted rules, launched contracts/prompts,
-reservations, lifecycle events, scope baselines/diffs, terminal reports, gates, accepted
-Clerk/audit packets.
+Once consumed by a launch, worker-rules revisions, task contracts, prompt/reservation/baseline bindings, terminal events, gates, and accepted semantic evidence are immutable. New meaning gets a new numbered artifact.
 
-`state.json` + exact immutable accepted evidence are execution authority. HANDOVER,
-progress prose, old chat, and summaries are continuity claims.
+## Minimal state
 
-## Minimal state expectations
+State records facts, not routing heuristics. Per task retain contract, current attempt/gate, bounded `last_attempt` pointer, status, and accepted evidence bindings:
 
-State records:
+```json
+{
+  "status": "accepted",
+  "current_contract": {"revision": 3, "path": "...", "sha256": "..."},
+  "last_attempt": {"role": "implementer", "attempt": 1, "event_dir": "...", "status": "gated", "integrity_gate": {"path": "...", "sha256": "..."}},
+  "current_attempt": {
+    "role": "reviewer", "attempt": 1, "event_dir": "...",
+    "launch_reservation": "...", "launch_reservation_sha256": "...",
+    "terminal_event": "...", "writes_project": false
+  },
+  "accepted": {
+    "source_gate": {"path": "...", "sha256": "..."},
+    "semantic_report": {"path": "...", "sha256": "..."},
+    "semantic_gate": {"path": "...", "sha256": "..."}
+  }
+}
+```
 
-- project/run/plan identity and authoritative plan reference/hash;
-- current immutable worker-rules revision;
-- parent harness + worker runtime/model/external DB;
-- execution status and one exact `next_action`;
-- per phase: status + write-barrier state/snapshot;
-- per task: status/dependencies, current contract path/hash/revision,
-  `decomposition_required`, zero-change streak, next role, and current/last attempt;
-- active attempt: role/number, event dir, reservation path/hash, terminal path,
-  liveness identity, and whether it writes project state;
-- worker availability/backoff and context checkpoint when active.
+`semantic_report` is the Reviewer report when the parent consumed it directly, or a Clerk report when compression was useful. Do not store regex verdicts, `next_role`, transport counters, dependency prose, or no-progress heuristics.
 
-Use `check_state.py`; use `dsd_state.py` for routine `bind-contract`, `bind-attempt`,
-`accept`, and `set-next` transitions. The helper validates a candidate before atomic
-replacement. Do not build a generic state patch API.
+At run level keep execution status, one exact `next_action`, worker-rules/runtime binding, optional availability/wait state, and checkpoint state. Use `dsd_state.py`; do not hand-patch routine transitions. `check_state.py` validates objective consistency only.
 
-`dsd_state.py accept` verifies the referenced **mechanical** evidence gate is clean; the
-parent must supply/own the semantic verdict/acceptance decision.
+## Attempt lifecycle
 
-## Attempt authority
+`dsd_attempt.py launch` resolves run-root authority, preflights the prior attempt, allocates/captures/renders, starts the detached monitor, and binds the new live attempt immediately; foreground mode then waits cheaply inside the helper. A later role moves the prior terminal attempt to bounded `last_attempt`.
 
-`launch-reservation.json` is the single immutable attempt identity. It binds task id,
-role/attempt number, report/log, prompt + hash, contract + hash, worker rules/manifest +
-hashes, scope baseline + hash, and reservation time. Lifecycle events bind back to it.
-Worker-authored Role/Task prose is never identity authority.
+No terminal event blocks normal relaunch. Recovery may use `--supersede-incomplete` only after establishing the old worker cannot still write; history records `lifecycle-incomplete`/`superseded`, never a fake exit.
 
-A role change starts a fresh worker session. Same-role session continuation is only for
-a trustworthy transport continuation. Pass durable prior evidence paths rather than chat
-history; `dsd_attempt.py launch --evidence` embeds their path+hash in the prompt.
+`terminal.json` proves lifecycle end, not semantic correctness. A terminal attempt without usable report gates to `report-recovery`. `gate` stores objective integrity and may bind current or archived attempts; worker prose is omitted unless `--surface` is requested.
 
-## Scope facts
+A clean gate means **safe to interpret**, never semantic PASS.
 
-Every attempt baseline covers tracked + untracked-nonignored Git worktree content,
-excluding only `DeepSeekAndDestroy/`. Contract `Extra scope inventory` adds ignored but
-load-bearing roots (locks/freezes/runtime roots); compare re-enumerates additions,
-removals, and modifications there too. Symlinks are hashed as links, never followed to
-external targets.
+## Scope
 
-Mechanical gate behavior:
+Every attempt compares project paths/content against task start.
 
-- writer: changed project paths must be inside exact `Allowed source changes`;
-- read-only role: any project movement is `READONLY-SCOPE-MOVED` and requires Recovery,
-  never semantic normalization;
-- baseline/reservation/hash/transport corruption is a hard mechanical failure;
-- missing/unchanged report after completed transport is evidence-availability trouble,
-  not a semantic FAIL and not a reason to rerun a long worker automatically.
+- read-only role: any project movement fails integrity;
+- Implementer/Fixer: movement must remain inside exact `Allowed source changes`;
+- Verification: read-only unless its contract explicitly grants generated/project write paths;
+- Evidence Clerk and other specialists: project-read-only.
 
-Inventory proves movement, not artifact correctness. Non-Git projects need an explicitly
-configured equivalent scope mechanism; do not pretend the Git gate applied.
+Git-ignored but load-bearing roots belong in task `Extra scope inventory`; baseline/diff recursively detect additions/removals/modifications there. Scope proves movement, not semantic validity. Content/path evidence outranks timestamps.
 
-## Meaning / Clerk
+## Interrupted/reportless work
 
-`evidence_gate.py` deliberately does **not** parse verdicts, AC coverage, Proof Matrices,
-defect prose, arithmetic, or report Markdown. `report_surface.py`/`dsd_attempt gate`
-may extract a bounded preview but that preview is non-authoritative.
+If a worker started but ends without trustworthy usable report evidence:
+1. establish that no writer can still mutate project state;
+2. preserve the immutable attempt;
+3. run objective scope comparison;
+4. source movement is **suspect changes**, never “nothing happened”;
+5. use Recovery for technical disposition; Clerk only interprets existing report material;
+6. any adopt/repair/revert/quarantine is an explicitly authorized writer task followed by fresh review.
 
-Evidence Clerk is project-read-only and may interpret/compress exact existing evidence.
-Use it when the parent-facing report is long/awkward/ambiguous or AC mapping is expensive.
-Give it the source report + mechanical gate (and exact-attempt log only when report
-recovery is needed). Clerk cannot run missing technical proof, repair, approve, waive
-mechanical failures, or recurse. Missing substance becomes one targeted specialist task.
+Never blindly rerun over unknown interrupted writes.
 
-## Reportless / interrupted recovery
+## Worker rules / semantic evidence
 
-If no trustworthy report exists after work began:
+`prepare_worker_rules.py` freezes run facts + worker doctrine into immutable `worker-rules/rNNNN/`; every attempt binds its exact revision/hash. Workers load only run facts + Common + one role + task; proof recipes only when explicitly named.
 
-1. confirm the worker/monitor can no longer mutate state;
-2. preserve terminal/lifecycle/log/scope evidence;
-3. if mechanical scope is trustworthy and the exact log/evidence contains the semantic
-   result, let one Clerk interpret it without altering project state;
-4. if project changes are partial/ambiguous/untrusted, launch read-only Recovery;
-5. Recovery recommends adopt-for-fresh-review, revert, quarantine, or specific missing
-   evidence; it does not perform the disposition;
-6. any disposition that mutates the project is a normal bounded writer task followed by
-   fresh review.
+Python never decides whether long prose proves requirements or means PASS/FAIL. At a parent decision boundary, request a bounded report surface; if that is insufficient, run one always-read-only Evidence Clerk over the exact contract/report/gate. Missing technical proof goes to targeted Verification/Review. The parent decides.
 
-Never infer "no changes" from a forced exit. Never let Clerk convert project-scope drift
-into acceptance.
+Every project mutation requires **fresh Reviewer provenance** before acceptance. Python may enforce that provenance fact only; it does not judge the review. A Fixer never validates its own repair; role changes use fresh contexts.
 
-## Two-zero-change / revalidation
+## Phase barrier
 
-Two consecutive substantial Implementer/Fixer attempts with zero intended changes and no
-proof the task was already satisfied set `decomposition_required=true`; no third writer
-until rediscovery/splitting/rescoping or a materially revised contract resolves why.
+A phase audit must describe one frozen source state:
 
-If an accepted prerequisite materially changes, mark dependents `needs-revalidation`.
-Cheap bounded revalidation yields still-valid or superseded; old PASS does not survive a
-changed premise automatically.
+```text
+finish phase writers
+→ close barrier + capture source snapshot
+→ required read-only post-barrier Verification
+→ fresh Phase Auditor
+→ parent phase decision
+```
 
-## Phase write barrier
+Any phase-owned mutation reopens the barrier and invalidates prior post-barrier Verification/Audit. The barrier protects concurrency/state identity; it does not decide semantic phase success.
 
-Before whole-phase audit:
+## Concurrency / waiting / availability
 
-1. finish and mechanically gate every phase-owned writer, including mutating Verification;
-2. close the barrier and capture the frozen project snapshot;
-3. run required post-barrier Verification read-only (or isolated outside accepted state);
-4. run fresh Phase Auditor against the same frozen state;
-5. parent adjudicates phase authority + compact audit evidence;
-6. remediation is new bounded tasks;
-7. any accepted-state mutation reopens the barrier and invalidates stale post-barrier
-   verification/audit evidence.
+Run directories isolate orchestration history, not source writes. Concurrent orchestrators with overlapping write scope need separate worktrees/branches or explicitly disjoint scopes. If attribution becomes unsafe, stop launching writers until ownership is resolved.
 
-`check_state.py` rejects a CLOSED/auditing barrier with an active project-writing attempt.
-Writer capability is derived from role + immutable contract, not role prose.
+Waiting is quiescent. Do not use model turns to poll logs/CPU/repository. Provider/quota/auth failure is infrastructure state, not permission for the premium parent to become the implementation worker. Preserve suspect writes before retrying post-start failures.
 
-## Waiting / transport / checkpoints
+## Resume
 
-Persist host wait identity before yielding when the parent harness needs it. A wait tool
-timeout without a terminal event is a non-event; wait again. If monitor/lifecycle state is
-inconsistent, load the active harness adapter and `OPENCODE.md` for diagnostics.
+A fresh parent starts from `state.json`, exact `next_action`, current contract/attempt/gate, relevant plan/authority reference, and only accepted semantic evidence needed for the next decision. Do not reread all historical reports/project architecture merely because the session changed.
 
-Provider/auth/quota failures are availability/transport problems, never authority for the
-premium parent to implement. Use bounded health probes/backoff/fallback.
+When several runs are active, require exact `DSD_RUN_ROOT`/user authority; never guess. Checkpoint details are in `COMPACTION.md`.
 
-For compaction, load `COMPACTION.md`. A resume must mechanically re-bind governing
-plan/config/authority and separately revalidate any live attempt. Native summaries are
-advisory.
+## Major log
+
+`major-findings-and-fixes.md` records only serious defects/root causes, consequential decisions, major fixes, accepted residuals, and genuine availability/human blocks with evidence links. It is not a transcript and does not duplicate routine reports.

@@ -1,22 +1,31 @@
 # DSD — Claude Code Parent Adapter
 
-Load only when the premium parent runs in Claude Code.
+Cold-load only when the premium parent is Claude Code. The default technical worker remains external OpenCode/DeepSeek.
 
-Install the project adapter once when needed:
+Install the project adapter once:
 
 ```bash
-python3 <skill-root>/scripts/install_harness_adapter.py --harness claude-code --project-root <project-root>
+python3 <skill>/scripts/install_harness_adapter.py --harness claude-code --project-root <project>
 ```
 
-Normal workers are launched through `dsd_attempt.py launch`. The installed
-`PostToolUse:Bash` + `asyncRewake` hook watches the returned exact `terminal.json` without
-model polling and wakes Claude only when that external worker terminates. On wake, run
-`dsd_attempt.py gate`; do not sample logs/CPU/repository merely for liveness.
+Normal detached task launch uses the shared interface:
 
-If project hooks are unavailable, use the returned attempt directory with
-`wait_worker.py --event-dir <attempt-dir>`. A host timeout without `terminal.json` is a
-non-event: immediately wait again.
+```bash
+python3 <skill>/scripts/dsd_attempt.py launch ... --detach
+```
 
-The adapter also installs checkpoint hooks. For compaction/restart details load
-`COMPACTION.md`; when multiple runs are active, set exact `DSD_RUN_ROOT` rather than
-letting hooks guess.
+The installed `PostToolUse:Bash` async-rewake helper watches the exact attempt `terminal.json` and wakes Claude only when the external worker is terminal. On re-wake run:
+
+```bash
+python3 <skill>/scripts/dsd_attempt.py gate --run-root <run> --phase-id <phase> --task-id <task>
+```
+
+If project hooks are unavailable, use:
+
+```bash
+python3 <skill>/scripts/dsd_attempt.py wait --run-root <run> --phase-id <phase> --task-id <task>
+```
+
+A host timeout without terminal evidence is a non-event: wait again without model-visible polling/diagnostics.
+
+The same adapter installs Claude compaction hooks. Load `COMPACTION.md` only at checkpoint/resume. Claude-native subagent hooks are relevant only when a Claude-native worker backend is explicitly selected.

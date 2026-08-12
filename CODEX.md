@@ -1,19 +1,21 @@
 # DSD — Codex Parent Adapter
 
-Load only when the premium parent runs in Codex. Default workers remain external
-OpenCode processes.
+Cold-load only when the premium parent is Codex. The default worker remains external OpenCode/DeepSeek.
 
-Launch through `dsd_attempt.py launch`, then wait quiescently on the exact terminal event
-(returned attempt directory) with `wait_worker.py` when the tool cannot remain open. A
-host timeout without `terminal.json` is a non-event: wait again; no periodic `ps`, log,
-CPU, or repository checks. On terminal completion run `dsd_attempt.py gate`.
-
-Install project-local checkpoint integration only when needed:
+Normal task commands are the shared high-level interface:
 
 ```bash
-python3 <skill-root>/scripts/install_harness_adapter.py --harness codex --project-root <project-root>
+python3 <skill>/scripts/dsd_attempt.py launch ... --detach
+python3 <skill>/scripts/dsd_attempt.py wait   --run-root <run> --phase-id <phase> --task-id <task>
+python3 <skill>/scripts/dsd_attempt.py gate   --run-root <run> --phase-id <phase> --task-id <task>
 ```
 
-If hooks are unavailable, use `COMPACTION.md` manual/fresh-session recovery. Native Codex
-agent waiting applies only when a run explicitly selects a native worker backend; never
-confuse it with the default external-worker lifecycle.
+If a foreground tool call can safely stay open for the worker duration, omit `--detach` and let tool completion be the wake event. Otherwise use the long blocking `wait` helper. If the host cuts off a wait before `terminal.json`, that is a non-event: immediately wait again without logs/CPU/state narration.
+
+Native Codex agent wait semantics apply only if the run explicitly selected a Codex-native worker backend; they do not describe the default external worker.
+
+For compaction/continuity install the project adapter and load `COMPACTION.md` only when needed:
+
+```bash
+python3 <skill>/scripts/install_harness_adapter.py --harness codex --project-root <project>
+```

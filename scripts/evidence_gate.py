@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
-"""Prove objective DSD attempt facts: authority, transport, report presence, and scope.
+"""Verify one DSD worker attempt's objective integrity envelope.
 
-This gate never interprets worker prose or decides software correctness. Semantic
-meaning belongs to the parent or Evidence Clerk.
+This gate deliberately does *not* interpret engineering meaning in worker prose.
+It proves only facts Python can establish reliably: immutable launch authority,
+process/native lifecycle, report artifact state, worker-rules integrity, and project
+scope movement. Semantic interpretation belongs to Evidence Clerk / the premium
+orchestrator.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from _roles import ROLE_NAMES, role_is_project_writer
+from _contract import allowed_source_changes, role_writes_project
+from _roles import ROLE_NAMES
 from _rules_snapshot import sha256_file, verify_snapshot
 
-from _task_contract import allowed_source_changes, extra_scope_inventory
 
-def read(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+def resolve_run_binding(run_root: Path, value: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        path = run_root / path
+    return path.resolve()
 
 
 def path_allowed(path: str, prefixes: list[str]) -> bool:
@@ -47,7 +52,7 @@ def run_scope_compare(skill_root: Path, project_root: Path, baseline: Path, outp
     return cp.returncode, data
 
 
-def reservation_from_terminal(terminal_path: Path, terminal: dict[str, Any], run_root: Path) -> tuple[dict[str, Any] | None, list[str]]:
+def reservation_from_terminal(terminal: dict[str, Any], run_root: Path) -> tuple[dict[str, Any] | None, list[str]]:
     errors: list[str] = []
     fmt = terminal.get("format")
     if fmt == "dsd-worker-terminal-v3":
@@ -55,7 +60,7 @@ def reservation_from_terminal(terminal_path: Path, terminal: dict[str, Any], run
         digest = terminal.get("launch_reservation_sha256")
         if not isinstance(value, str):
             return None, ["terminal launch_reservation binding missing"]
-        path = Path(value).resolve()
+        path = resolve_run_binding(run_root, value)
         try:
             path.relative_to(run_root)
         except ValueError:
@@ -73,14 +78,16 @@ def reservation_from_terminal(terminal_path: Path, terminal: dict[str, Any], run
         if reservation.get("format") not in {"dsd-worker-launch-reservation-v1", "dsd-worker-launch-reservation-v2"}:
             errors.append(f"unsupported launch reservation format: {reservation.get('format')!r}")
         return reservation, errors
-
     if fmt == "dsd-worker-terminal-v2":
         # Historical v14 evidence repeated immutable authority directly in terminal.
         return dict(terminal), errors
     return None, [f"unsupported terminal event format: {fmt!r}"]
 
 
-def authority_matches(reservation: dict[str, Any], *, run_root: Path, task: Path, report: Path, baseline: Path, log: Path | None, role: str) -> list[str]:
+def authority_matches(
+    reservation: dict[str, Any], *, run_root: Path, task: Path, report: Path,
+    baseline: Path, log: Path | None, role: str,
+) -> list[str]:
     errors: list[str] = []
     reserved_role = str(reservation.get("role", "")).lower()
     if reserved_role != role.lower():
@@ -91,7 +98,7 @@ def authority_matches(reservation: dict[str, Any], *, run_root: Path, task: Path
         bindings["log"] = log
     for field, expected in bindings.items():
         actual = reservation.get(field)
-        if not isinstance(actual, str) or Path(actual).resolve() != expected:
+        if not isinstance(actual, str) or resolve_run_binding(run_root, actual) != expected:
             errors.append(f"launch reservation {field} binding mismatch: expected {expected}, got {actual!r}")
 
     for field, path in (("task_contract", task), ("scope_baseline", baseline)):
@@ -106,7 +113,7 @@ def authority_matches(reservation: dict[str, Any], *, run_root: Path, task: Path
     if not isinstance(prompt_value, str):
         errors.append("launch reservation prompt_file binding missing")
     else:
-        prompt_path = Path(prompt_value).resolve()
+        prompt_path = resolve_run_binding(run_root, prompt_value)
         try:
             prompt_path.relative_to(run_root)
         except ValueError:
@@ -123,7 +130,7 @@ def authority_matches(reservation: dict[str, Any], *, run_root: Path, task: Path
     if not isinstance(rules_value, str):
         errors.append("launch reservation worker_rules binding missing")
     else:
-        rules_path = Path(rules_value).resolve()
+        rules_path = resolve_run_binding(run_root, rules_value)
         try:
             rules_path.relative_to(run_root / "worker-rules")
         except ValueError:
@@ -143,7 +150,7 @@ def authority_matches(reservation: dict[str, Any], *, run_root: Path, task: Path
                 manifest_path = Path(snapshot["manifest"]).resolve()
                 manifest_value = reservation.get("worker_rules_manifest")
                 manifest_hash = reservation.get("worker_rules_manifest_sha256")
-                if not isinstance(manifest_value, str) or Path(manifest_value).resolve() != manifest_path:
+                if not isinstance(manifest_value, str) or resolve_run_binding(run_root, manifest_value) != manifest_path:
                     errors.append("launch reservation worker_rules_manifest binding mismatch")
                 elif not isinstance(manifest_hash, str) or len(manifest_hash) != 64:
                     errors.append("launch reservation worker_rules_manifest_sha256 missing/invalid")
@@ -152,11 +159,17 @@ def authority_matches(reservation: dict[str, Any], *, run_root: Path, task: Path
     return errors
 
 
-def terminal_matches_attempt(candidate: Path, data: dict[str, Any], run_root: Path, task: Path, report: Path, baseline: Path, log: Path | None, role: str) -> bool:
-    reservation, errs = reservation_from_terminal(candidate, data, run_root)
+def terminal_matches_attempt(
+    data: dict[str, Any], run_root: Path, task: Path, report: Path,
+    baseline: Path, log: Path | None, role: str,
+) -> bool:
+    reservation, errs = reservation_from_terminal(data, run_root)
     if reservation is None or errs:
         return False
-    return not authority_matches(reservation, run_root=run_root, task=task, report=report, baseline=baseline, log=log, role=role)
+    return not authority_matches(
+        reservation, run_root=run_root, task=task, report=report,
+        baseline=baseline, log=log, role=role,
+    )
 
 
 def main() -> int:
@@ -180,22 +193,21 @@ def main() -> int:
     run_root = args.run_root.resolve()
     if not run_root.is_dir():
         print(f"ERROR: run root missing/not directory: {run_root}", file=sys.stderr); return 2
+    if not args.project_root.is_absolute():
+        print(f"ERROR: --project-root must be absolute: {args.project_root}", file=sys.stderr); return 2
 
     def run_path(value: Path | None) -> Path | None:
         if value is None:
             return None
-        return value.resolve() if value.is_absolute() else (run_root / value).resolve()
+        return (value if value.is_absolute() else run_root / value).resolve()
 
     task = run_path(args.task); report = run_path(args.report); baseline = run_path(args.scope_baseline)
     assert task is not None and report is not None and baseline is not None
     project_root = args.project_root.resolve()
     log = run_path(args.log)
     terminal_event = run_path(args.terminal_event)
-    scope_output = run_path(args.scope_output)
-    output_arg = run_path(args.output)
     skill_root = args.skill_root.resolve()
-
-    for label, path in (("task", task), ("report", report), ("terminal-event", terminal_event), ("log", log), ("scope-output", scope_output), ("output", output_arg)):
+    for label, path in (("task", task), ("report", report), ("terminal-event", terminal_event), ("log", log)):
         if path is None:
             continue
         try:
@@ -215,12 +227,12 @@ def main() -> int:
                 data = json.loads(candidate.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            if terminal_matches_attempt(candidate.resolve(), data, run_root, task, report, baseline, log, args.role):
+            if terminal_matches_attempt(data, run_root, task, report, baseline, log, args.role):
                 candidates.append(candidate.resolve())
         if len(candidates) == 1:
             terminal_event = candidates[0]
         elif not candidates:
-            errors.append("no launcher terminal event uniquely binds this attempt")
+            errors.append("no terminal event uniquely binds this attempt")
         else:
             errors.append("multiple terminal events match this attempt; pass --terminal-event explicitly")
 
@@ -234,42 +246,43 @@ def main() -> int:
                 errors.append(f"terminal event unreadable: {exc}")
             else:
                 if str(terminal.get("status", "")).lower() != "completed" or terminal.get("exit_code") != 0:
-                    errors.append(f"worker transport not successfully completed: status={terminal.get('status')!r} exit_code={terminal.get('exit_code')!r}")
-                reservation_obj, terminal_errors = reservation_from_terminal(terminal_event, terminal, run_root)
+                    errors.append(f"worker lifecycle not completed/0: status={terminal.get('status')!r} exit={terminal.get('exit_code')!r}")
+                reservation_obj, terminal_errors = reservation_from_terminal(terminal, run_root)
                 errors.extend(terminal_errors)
                 if reservation_obj is not None:
                     reservation = reservation_obj
-                    errors.extend(authority_matches(reservation, run_root=run_root, task=task, report=report, baseline=baseline, log=log, role=args.role))
+                    errors.extend(authority_matches(
+                        reservation, run_root=run_root, task=task, report=report,
+                        baseline=baseline, log=log, role=args.role,
+                    ))
 
     if not task.is_file():
         errors.append(f"task missing: {task}")
         task_text = ""
     else:
-        task_text = read(task)
+        task_text = task.read_text(encoding="utf-8", errors="replace")
+
+    reserved_writes = reservation.get("writes_project") if reservation else None
+    if isinstance(reserved_writes, bool):
+        writes_project = reserved_writes
+    else:
+        writes_project = role_writes_project(args.role, task_text)
+        warnings.append("historical attempt lacks writes_project reservation; capability derived from role + contract")
     try:
-        allowed_writes = allowed_source_changes(task_text)
-        required_extra_inventory = extra_scope_inventory(task_text)
+        allowed_writes = allowed_source_changes(task_text) if writes_project else []
     except ValueError as exc:
-        errors.append(str(exc)); allowed_writes = []; required_extra_inventory = []
+        errors.append(str(exc)); allowed_writes = []
 
     report_state = "missing"
-    report_sha = None
-    report_bytes = None
-    report_recovery_required = False
-    if not report.is_file():
-        report_recovery_required = True
-    else:
+    report_sha: str | None = None
+    if report.is_file():
         report_sha = sha256_file(report)
-        report_bytes = report.stat().st_size
         skeleton_sha = reservation.get("report_skeleton_sha256") if reservation else None
-        if isinstance(skeleton_sha, str) and report_sha == skeleton_sha.lower():
-            report_state = "unchanged-skeleton"
-            report_recovery_required = True
-        else:
-            report_state = "substantive"
+        report_state = "launcher-skeleton" if isinstance(skeleton_sha, str) and report_sha == skeleton_sha.lower() else "present"
 
-    scope_result: dict[str, Any] | None = None
-    if not baseline.is_file():
+    scope_diff: Path | None = None
+    scope_summary: dict[str, Any] = {}
+    if not baseline.exists():
         errors.append(f"SCOPE-BASELINE-MISSING: {baseline}")
     elif not project_root.is_dir():
         errors.append(f"project root missing/not directory: {project_root}")
@@ -277,77 +290,88 @@ def main() -> int:
         try:
             baseline_data = json.loads(baseline.read_text(encoding="utf-8"))
             if baseline_data.get("inventory_mode") != "git-worktree":
-                errors.append("SCOPE-BASELINE-UNSAFE: terminal gate requires a git-worktree snapshot")
+                errors.append("SCOPE-BASELINE-UNSAFE: terminal gate requires git-worktree inventory")
             exclusions = [str(x).strip("/") for x in baseline_data.get("exclude_prefixes", [])]
             if exclusions != ["DeepSeekAndDestroy"]:
                 errors.append("SCOPE-BASELINE-UNSAFE: only DeepSeekAndDestroy may be excluded")
-            baseline_extra = [str(x).strip("/") for x in baseline_data.get("extra_inventory_roots", []) if isinstance(x, str)]
-            missing_extra = [root for root in required_extra_inventory if root not in baseline_extra]
-            if missing_extra:
-                errors.append("SCOPE-BASELINE-MISSING-EXTRA-INVENTORY: " + ", ".join(missing_extra))
-            out = scope_output or next_numbered_path(report.with_name("scope-diff.json").resolve())
-            if scope_output and out.exists():
-                raise ValueError(f"immutable scope output already exists: {out}")
-            rc, scope_result = run_scope_compare(skill_root, project_root, baseline, out)
+            requested = run_path(args.scope_output)
+            base_out = (terminal_event.parent if terminal_event is not None else report.parent) / "scope-diff.json"
+            scope_diff = requested if requested is not None else next_numbered_path(base_out)
+            if requested is not None and scope_diff.exists():
+                raise ValueError(f"immutable scope output already exists: {scope_diff}")
+            rc, scope_result = run_scope_compare(skill_root, project_root, baseline, scope_diff)
             if rc not in (0, 1):
                 errors.append("scope comparison helper failed")
             changed = scope_result.get("changed", []) if isinstance(scope_result, dict) else []
-            changed_paths = [str(entry.get("path", "")) for entry in changed if entry.get("path")]
-            if role_is_project_writer(args.role, allowed_writes):
-                outside = [p for p in changed_paths if not path_allowed(p, allowed_writes)]
-                if outside:
-                    errors.append(f"SCOPE-DRIFT: {len(outside)} path(s) outside Allowed source changes: " + ", ".join(outside[:12]))
-            elif changed_paths:
-                errors.append(f"READONLY-SCOPE-MOVED: {len(changed_paths)} project path(s); use Recovery, never semantic normalization")
+            changed_paths = [str(x.get("path", "")) for x in changed if x.get("path")]
+            outside = [p for p in changed_paths if writes_project and not path_allowed(p, allowed_writes)]
+            if outside:
+                errors.append(f"SCOPE-DRIFT: {len(outside)} path(s) outside Allowed source changes: " + ", ".join(outside[:12]))
+            if not writes_project and changed_paths:
+                errors.append(f"READONLY-SCOPE-MOVED: {len(changed_paths)} project path(s)")
+            scope_summary = {
+                "baseline": str(baseline),
+                "diff": str(scope_diff),
+                "changed_count": len(changed_paths),
+                "added_count": len(scope_result.get("added", [])),
+                "removed_count": len(scope_result.get("removed", [])),
+                "modified_count": len(scope_result.get("modified", [])),
+                "extra_inventory": list(baseline_data.get("extra_inventory_specs", [])),
+            }
         except Exception as exc:
             errors.append(f"scope comparison failed: {exc}")
 
-    # Report recovery is an evidence-availability route, not a software verdict.
-    # It stays separate from hard integrity failures so a cheap Clerk may inspect
-    # exact-attempt output/log locations without rerunning a long technical worker.
-    ok = not errors and not report_recovery_required
+    ready = not errors and report_state == "present"
+    needs_report_recovery = not errors and report_state != "present"
+    reservation_path = terminal.get("launch_reservation") if terminal else None
+    reservation_sha = terminal.get("launch_reservation_sha256") if terminal else None
+
     result = {
-        "format": "dsd-evidence-gate-v4",
+        "format": "dsd-integrity-gate-v2",
+        "integrity_ok": not errors,
+        "ready_for_interpretation": ready,
+        "needs_report_recovery": needs_report_recovery,
         "role": args.role,
-        "ok": ok,
-        "mechanical_ok": not errors,
-        "report_recovery_required": report_recovery_required,
-        "report_state": report_state,
-        "report_bytes": report_bytes,
-        "errors": errors,
-        "warnings": warnings,
-        "run_root": str(run_root),
+        "writes_project": writes_project,
+        "allowed_source_changes": allowed_writes,
         "task": str(task),
+        "task_sha256": sha256_file(task) if task.is_file() else None,
         "report": str(report),
         "report_sha256": report_sha,
+        "report_state": report_state,
         "terminal_event": str(terminal_event) if terminal_event else None,
-        "terminal": terminal,
-        "launch_reservation": reservation,
+        "terminal_event_sha256": sha256_file(terminal_event) if terminal_event and terminal_event.is_file() else None,
+        "launch_reservation": reservation_path,
+        "launch_reservation_sha256": reservation_sha,
         "log": str(log) if log else None,
-        "allowed_source_changes": allowed_writes,
-        "required_extra_scope_inventory": required_extra_inventory,
-        "scope": scope_result,
+        "scope": scope_summary,
+        "errors": errors,
+        "warnings": warnings,
     }
 
     rendered = json.dumps(result, indent=2, sort_keys=True)
-    if output_arg:
-        output_arg.parent.mkdir(parents=True, exist_ok=True)
+    if args.output:
+        output_path = run_path(args.output)
+        assert output_path is not None
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with output_arg.open("x", encoding="utf-8") as handle:
+            with output_path.open("x", encoding="utf-8") as handle:
                 handle.write(rendered + "\n")
         except FileExistsError:
-            print(f"ERROR: immutable evidence-gate output already exists: {output_arg}", file=sys.stderr); return 2
+            print(f"ERROR: immutable integrity gate exists: {output_path}", file=sys.stderr); return 2
     if args.json:
         print(rendered)
     else:
-        state = "CLEAN" if ok else "REPORT RECOVERY" if report_recovery_required and not errors else "FAIL"
-        print("EVIDENCE GATE: " + state)
-        print(f"Report: {report}")
+        state = "READY" if ready else "REPORT-RECOVERY" if needs_report_recovery else "FAIL"
+        print(f"INTEGRITY GATE: {state}")
+        print(f"Report: {report} ({report_state})")
+        if scope_diff:
+            print(f"Scope diff: {scope_diff}")
         if errors:
             print("Errors: " + "; ".join(errors))
     if errors:
         return 1
-    if report_recovery_required:
+    if needs_report_recovery:
         return 4
     return 0
 

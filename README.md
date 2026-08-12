@@ -1,35 +1,102 @@
 # DeepSeek and Destroy
 
-DeepSeek and Destroy (DSD) is a plan-execution skill for using a strong premium model as
-an **orchestrator** while delegating repository-heavy work to cheaper specialist models.
-The design goal is high assurance with low premium-context and token waste.
+> Give a premium coding agent the plan. Cheap specialist workers do the repository-scale work; the parent keeps authority and judgment.
 
-## Core boundary
+DeepSeek and Destroy (DSD) is a long-horizon plan-execution skill for Codex, Claude Code, OpenCode, Kilo Code, and comparable coding harnesses. The default worker backend is external OpenCode using `opencode-go/deepseek-v4-flash`.
 
-- **Premium parent:** authority, decomposition, routing, acceptance, architecture choices.
-- **Technical workers:** discovery, implementation, fixing, review, verification, recovery.
-- **Python helpers:** objective facts only—identity, hashes, lifecycle, scope movement,
-  immutable bindings, write boundaries.
-- **Evidence Clerk:** optional cheap semantic adapter for long/awkward worker evidence.
-
-Worker prose is not a machine protocol. DSD does not accept/reject engineering work
-because a model omitted a verdict marker, AC label, Markdown table, or exact wording.
-
-## Normal lifecycle
-
-The parent creates a small immutable JSON-backed task contract, chooses a role, then uses
-one launch transaction:
-
-```bash
-python3 scripts/dsd_attempt.py launch \
-  --state /abs/run/state.json --phase P1 --task U1 --role reviewer
-```
-
-A new attempt is self-contained:
+## Core model
 
 ```text
-phases/<phase>/<task>/attempts/<role>-<n>/
-  prompt.txt
+premium parent
+  authority / decomposition / decisions
+        │
+        ▼
+cheap technical worker
+  natural engineering report + evidence
+        │
+        ▼
+objective integrity gate
+  hashes / lifecycle / exact source movement
+        │
+        ├── clear bounded result ─────────► parent
+        │
+        └── costly/unclear to interpret ─► Evidence Clerk ─► parent
+```
+
+Python proves facts it can know exactly. It does **not** decide whether worker prose proves an acceptance criterion, contains a defect, or semantically means PASS/FAIL.
+
+The Evidence Clerk is an optional, always-project-read-only semantic adapter. It interprets and compresses evidence already produced; it cannot invent missing proof, rerun technical verification, repair code, waive integrity failures, approve work, or recurse into another Clerk.
+
+## Normal task loop
+
+```text
+Implementer
+    ↓
+fresh Reviewer
+   ↙     ↘
+PASS    FAIL
+ │        ↓
+ │      fresh Fixer
+ │        ↓
+ │      fresh Reviewer
+ └────────┘
+    ↓
+parent consumes bounded Reviewer surface
+    ↓ only if useful
+Evidence Clerk
+    ↓
+parent accepts / routes / escalates
+```
+
+A Clerk is **not** inserted between specialists by default. Implementer/Fixer evidence normally goes straight to the fresh Reviewer. Missing technical evidence goes to a targeted Verification/Review worker, not a formatting retry.
+
+Every project mutation still requires fresh independent Reviewer provenance before acceptance.
+
+## Context economy
+
+The always-relevant parent doctrine is `SKILL.md`. Detailed material is cold-loaded only when needed:
+
+- `WORKSPACE.md` — state, evidence, recovery, concurrency, barriers;
+- `CODEX.md`, `CLAUDE.md`, `KILO.md` — parent harness adapters;
+- `OPENCODE.md` — external worker transport/recovery;
+- `COMPACTION.md` — checkpoint/resume;
+- `PROMPTS.md` — task/handoff authoring reference.
+
+Workers receive only:
+
+```text
+WORKER_RULES.md                 run facts
+worker/COMMON.md                universal worker behavior
+worker/roles/<role>/SKILL.md    exactly one specialist role
+task contract                   exact task semantics
+PROOF-PATTERNS.md               only when explicitly named by that task
+```
+
+Unrelated roles and manuals are never loaded by default.
+
+## Parent interface
+
+Task semantics are authored as compact JSON and rendered into an immutable contract. Routine attempt bookkeeping is mechanical:
+
+```text
+dsd_attempt.py launch …
+dsd_attempt.py wait …       # detached workers only
+dsd_attempt.py gate …
+```
+
+`launch` derives a self-contained attempt directory, scope baseline, prompt/report/log paths, immutable reservation, worker launch, and state binding. `gate` checks only objective integrity; add `--surface` only at a parent semantic-consumption boundary. Intermediate specialist gates therefore inject no worker prose into premium context.
+
+If the requested bounded prefix is insufficient for a parent decision, run the optional Evidence Clerk over the exact immutable contract/report/gate. The parent then records acceptance with `dsd_state.py accept-task`.
+
+The premium parent should not hand-edit `state.json`, serialize dozens of launch arguments, inspect parser regexes, or poll workers in chat context.
+
+## Self-contained attempts
+
+New attempts live at:
+
+```text
+phases/<phase>/tasks/<task>/attempts/<role>-<n>/
+  launch-prompt.txt
   scope-baseline.json
   launch-reservation.json
   attempt.json
@@ -40,114 +107,86 @@ phases/<phase>/<task>/attempts/<role>-<n>/
   evidence-gate.json
 ```
 
-After the exact terminal event appears:
+`launch-reservation.json` is the immutable attempt authority. Lifecycle records bind back to it rather than duplicating authority fields.
 
-```bash
-python3 scripts/dsd_attempt.py gate \
-  --state /abs/run/state.json --phase P1 --task U1
-```
+## Worker reports are natural language
 
-The gate verifies mechanical integrity and returns a bounded **non-authoritative report
-surface**. The parent reads that small surface. If semantic mapping/compression is still
-expensive, one Evidence Clerk turns the existing report + mechanical gate into a small
-semantic packet. Missing technical proof becomes a targeted specialist task, not a rerun
-of a long worker for formatting.
+A long worker report is evidence, not a machine wire protocol. Mechanical acceptance does not require:
 
-## Context economy
+- `Verdict: PASS` or any other magic line;
+- a FINAL marker;
+- a Proof Matrix table;
+- repeated AC identifiers;
+- a special defects section;
+- machine-parseable test arithmetic.
 
-The always-loaded parent instructions live in `SKILL.md`. Everything else is lazy:
+Workers are encouraged to lead with a concise conclusion and then provide real evidence. If semantic mapping is expensive or ambiguous, the Clerk interprets it. If proof is genuinely absent, it remains absent.
 
-- `WORKSPACE.md` — recovery, state/provenance edge cases, phase barriers;
-- `PROMPTS.md` — manual contract/helper reference;
-- `CLAUDE.md`, `CODEX.md`, `KILO.md`, etc. — active parent harness only;
-- `OPENCODE.md` — transport/provider/database troubleshooting only;
-- `COMPACTION.md` — checkpoint/rehydration only.
+## Deterministic safeguards that remain
 
-A worker sees only:
+DSD deliberately retains deterministic mechanisms for facts where they are stronger than LLM inference:
 
-1. immutable run rules;
-2. `worker/COMMON.md`;
-3. its single role skill;
-4. its task contract;
-5. optionally `PROOF-PATTERNS.md` **only when the contract names a recipe**;
-6. explicitly supplied immutable evidence paths when needed.
+- immutable contract/rules/evidence hashes;
+- exact attempt reservation and real terminal lifecycle;
+- content-based changed-path baselines;
+- read-only-role write violations;
+- writer changes outside exact allowed paths;
+- declared Git-ignored/load-bearing trees;
+- reportless/suspect-change Recovery;
+- external OpenCode DB isolation outside the repository;
+- phase write barrier / frozen phase evidence;
+- governing-authority continuity across compaction/resume;
+- fresh Reviewer provenance after mutation.
 
-It does not receive unrelated role manuals or the whole parent skill.
+A clean integrity gate means **safe to interpret**, not “the engineering passed.”
 
 ## Roles
 
-- **Discovery:** bounded fact finding; no project writes.
-- **Phase Surveyor:** phase-level dependency/scope map; no project writes.
-- **Implementer:** bounded project mutation.
-- **Fixer:** bounded repair after a demonstrated defect.
-- **Reviewer:** fresh adversarial semantic review; no project writes.
-- **Verification:** one bounded predicate; read-only unless the contract explicitly grants
-  generated/project artifact paths.
-- **Recovery:** read-only forensic disposition of interrupted/ambiguous work.
-- **Phase Auditor:** fresh read-only whole-phase audit after the write barrier closes.
-- **Evidence Clerk:** always project-read-only; interprets/compresses existing evidence.
+- **Phase Surveyor** — measured current state before decomposition.
+- **Discovery** — traces one unfamiliar subsystem and writes a durable construction brief.
+- **Implementer** — builds one bounded change.
+- **Fixer** — repairs explicit supplied findings.
+- **Reviewer** — fresh adversarial read-only review.
+- **Verification** — establishes one technical predicate; it may write only exact generated/project paths explicitly authorized by the contract.
+- **Recovery** — read-only forensic disposition of suspect interrupted changes.
+- **Phase Auditor** — fresh whole-phase audit against a frozen phase state.
+- **Evidence Clerk** — read-only interpretation/reconciliation/compression of existing evidence.
 
-Every accepted project mutation requires fresh independent review. No worker self-approves.
+The role files are Agent-Skill-compatible `SKILL.md` files, but production DSD selects their exact immutable paths explicitly. It does not depend on probabilistic native skill discovery.
 
-## Mechanical safety
+## Phase completion
 
-`launch-reservation.json` is the immutable authority for an attempt. It binds role/task,
-prompt, task contract, worker rules, scope baseline, report/log paths, and hashes.
+After task work finishes:
 
-Scope baselines cover tracked + untracked-nonignored Git content while excluding only
-`DeepSeekAndDestroy/`. A task may declare ignored/load-bearing roots with `Extra scope
-inventory`; those are recursively inventoried too. Read-only roles fail on project
-movement. Writers fail on paths outside exact `Allowed source changes`.
-
-These checks prove **what happened to bytes/processes**, not whether engineering prose is
-convincing. Semantic adequacy remains an LLM/parent responsibility.
-
-## Contracts and state
-
-Prefer:
-
-```bash
-python3 scripts/render_task_contract.py --spec contract.json
+```text
+finish all phase writers
+→ close/freeze phase barrier
+→ required read-only post-barrier verification
+→ fresh Phase Auditor
+→ premium parent phase decision
 ```
 
-Contracts should remain small. Use only fields needed for the task: objective, authority,
-inputs, write scope, ACs, proof obligations, optional proof recipes, verification,
-exclusions, and extra ignored-tree inventory.
+Any later phase mutation invalidates the frozen evidence and reopens the barrier.
 
-Use `dsd_state.py` for routine state transitions instead of hand-written JSON mutations.
-It validates a candidate with `check_state.py` before atomically replacing `state.json`.
+## Waiting and failure recovery
 
-## Report recovery
+External workers emit `terminal.json` when the actual worker process ends. Waiting is quiescent: no terminal event means wait again, without model-driven log/CPU/repository polling.
 
-A completed worker whose report is missing or still the launcher skeleton is **not** an
-engineering failure. Preserve the exact attempt evidence. Interpret recoverable evidence
-with one Clerk when possible; use Recovery when technical/project state is ambiguous.
-Do not rerun hours of technical work just to obtain preferred report formatting.
+If a worker dies after starting, source changes are **suspect**, not assumed absent. Recovery inspects the immutable baseline/diff and recommends disposition before retry or adoption.
 
-## Harnesses
+Worker/provider availability problems do not turn the premium parent into the implementation workforce.
 
-Supported first-class parent adapters: Codex, Claude Code, OpenCode, and Kilo. Install
-project-local hooks/plugins with `scripts/install_harness_adapter.py`; Kilo worker agents
-use `scripts/install_kilo_workers.py`.
+## Installation
 
-OpenCode worker databases must live outside the project tree to avoid project-copy/
-SQLite interference. See `OPENCODE.md` only when transport details matter.
+Copy the whole `deepseek-and-destroy` directory into the skills directory supported by your parent harness. The package includes first-class adapters for Codex, Claude Code, OpenCode, and Kilo Code.
 
-## Testing
+No configuration file is required for the default external OpenCode worker profile. `CONFIG.example.md` shows optional overrides. Do not store credentials in DSD configuration.
 
-The current regression suites separate mechanical integrity from semantic interpretation:
+## Quick start
 
-```bash
-python3 -m unittest tests.test_v15_3_consolidation -v
-python3 -m unittest tests.test_v15_2_simplification -v
-python3 -m unittest tests.test_v15_integrity -v
-python3 -m unittest tests.test_v15_helpers -v
-python3 -m unittest tests.test_v15_1_harnesses -v
+```text
+Use DeepSeek and Destroy to execute the authoritative plan at <path>.
+Continue autonomously until complete or genuinely human-blocked.
 ```
 
-Some harness/plugin tests spawn child processes; run suites independently if a host shell
-retains inherited pipes after unittest exits.
-
-## License
-
-MIT. See `LICENSE`.
+For long runs, DSD preserves exact state/evidence and one `next_action`, so context compaction or a fresh parent session resumes execution rather than reconstructing the entire history.

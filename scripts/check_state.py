@@ -1,32 +1,46 @@
 #!/usr/bin/env python3
-"""Validate DeepSeek and Destroy control-plane state invariants.
+"""Validate objective DSD run-state invariants.
 
-This is mechanical consistency checking, not semantic acceptance judgment.
+This checker validates durable bindings, lifecycle facts, phase-writer safety, and
+resume/turn-exit consistency. It does not infer engineering meaning, task verdicts,
+or orchestration strategy from prose/state hints.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
-from _roles import ZERO_CHANGE_GUARD_ROLES, role_is_project_writer
 from _rules_snapshot import sha256_file, verify_snapshot
-from _task_contract import allowed_source_changes
 
-TERMINAL = {"completed", "human-blocked", "paused-by-user", "abandoned"}
+TERMINAL_RUN = {"completed", "human-blocked", "paused-by-user", "abandoned"}
+ACTIVE_ATTEMPT = {"launching", "in-progress"}
+POST_ATTEMPT = {"process-exited", "gated", "report-recovery", "integrity-failed"}
 
 
-def existing(path_value: Any, base: Path) -> bool:
-    if not isinstance(path_value, str) or not path_value.strip():
-        return False
-    path = Path(path_value)
+def resolve(base: Path, raw: Any) -> Path | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    path = Path(raw)
     if not path.is_absolute():
         path = base / path
-    return path.exists()
+    return path.resolve()
+
+
+def inside(base: Path, path: Path) -> bool:
+    try:
+        path.relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def existing(base: Path, raw: Any) -> Path | None:
+    path = resolve(base, raw)
+    return path if path is not None and path.exists() else None
 
 
 def pid_alive(pid: Any) -> bool:
@@ -34,190 +48,219 @@ def pid_alive(pid: Any) -> bool:
         return False
     try:
         os.kill(pid, 0)
+        return True
     except OSError:
         return False
-    return True
 
 
-def attempt_pid(attempt: dict[str, Any]) -> Any:
-    return attempt.get("worker_pid") or attempt.get("pid") or attempt.get("monitor_pid")
+def validate_binding(base: Path, label: str, binding: Any, errors: list[str]) -> Path | None:
+    if not isinstance(binding, dict):
+        errors.append(f"{label} binding missing")
+        return None
+    path = resolve(base, binding.get("path"))
+    digest = binding.get("sha256")
+    if path is None:
+        errors.append(f"{label}.path missing")
+        return None
+    if not path.is_file():
+        errors.append(f"{label} path missing: {path}")
+        return None
+    if not isinstance(digest, str) or len(digest) != 64:
+        errors.append(f"{label}.sha256 missing/invalid")
+    elif sha256_file(path) != digest.lower():
+        errors.append(f"{label} changed after binding")
+    return path
 
 
-def task_declares_project_writes(task: dict[str, Any], base: Path) -> bool:
-    """Return whether the current immutable contract grants project write paths."""
-    contract = task.get("current_contract") or {}
-    value = contract.get("path") or task.get("contract_path") or task.get("task_path")
-    if not isinstance(value, str) or not value.strip():
-        return False
-    path = Path(value)
-    if not path.is_absolute():
-        path = base / path
+def validate_worker_rules(base: Path, state: dict[str, Any], errors: list[str]) -> None:
+    runtime = state.get("worker_runtime")
+    if not runtime:
+        return
+    rules = state.get("worker_rules")
+    if not isinstance(rules, dict):
+        errors.append("active worker runtime requires worker_rules binding")
+        return
+    revision = rules.get("revision")
+    if not isinstance(revision, int) or revision < 1:
+        errors.append("worker_rules.revision must be a positive integer")
+    rules_path = validate_binding(base, "worker_rules", rules, errors)
+    if rules_path is None:
+        return
+    expected = base.resolve() / "worker-rules" / f"r{revision:04d}" / "WORKER_RULES.md" if isinstance(revision, int) and revision >= 1 else None
+    if expected is not None and rules_path != expected:
+        errors.append("worker_rules.path is not the recorded immutable worker-rules revision")
     try:
-        return bool(allowed_source_changes(path.read_text(encoding="utf-8", errors="replace")))
-    except (OSError, ValueError):
-        return False
+        snapshot = verify_snapshot(rules_path)
+    except ValueError as exc:
+        errors.append(f"worker-rules snapshot integrity failed: {exc}")
+        return
+    # State may keep these convenience bindings; if present they must agree.
+    for key, actual in (
+        ("protocol_dir", snapshot["protocol_dir"]),
+        ("protocol_fingerprint", snapshot["protocol_fingerprint"]),
+        ("manifest", snapshot["manifest"]),
+        ("manifest_sha256", sha256_file(Path(snapshot["manifest"]))),
+    ):
+        if key in rules:
+            value = rules.get(key)
+            if key in {"protocol_dir", "manifest"} and isinstance(value, str):
+                value = str(resolve(base, value))
+            if str(value) != str(actual):
+                errors.append(f"worker_rules.{key} disagrees with immutable snapshot")
 
 
-def validate_task(task_id: str, task: dict[str, Any], base: Path, worker_rules: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
+def load_reservation(base: Path, task_id: str, task: dict[str, Any], errors: list[str]) -> tuple[dict[str, Any] | None, Path | None]:
+    attempt = task.get("current_attempt")
+    if not isinstance(attempt, dict):
+        return None, None
+    event_dir = resolve(base, attempt.get("event_dir"))
+    if event_dir is None or not inside(base, event_dir):
+        errors.append(f"{task_id}: current_attempt.event_dir missing/outside run")
+        return None, None
+    reservation_path = event_dir / "launch-reservation.json"
+    if not reservation_path.is_file():
+        errors.append(f"{task_id}: launch reservation missing")
+        return None, event_dir
+    expected_sha = attempt.get("launch_reservation_sha256")
+    if isinstance(expected_sha, str) and len(expected_sha) == 64:
+        if sha256_file(reservation_path) != expected_sha.lower():
+            errors.append(f"{task_id}: launch reservation changed after binding")
+    try:
+        data = json.loads(reservation_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        errors.append(f"{task_id}: cannot read launch reservation: {exc}")
+        return None, event_dir
+    if not isinstance(data, dict):
+        errors.append(f"{task_id}: launch reservation is not an object")
+        return None, event_dir
+    if attempt.get("role") and str(attempt.get("role")) != str(data.get("role")):
+        errors.append(f"{task_id}: current_attempt role disagrees with reservation")
+    if "writes_project" in attempt and bool(attempt.get("writes_project")) != bool(data.get("writes_project")):
+        errors.append(f"{task_id}: current_attempt writes_project disagrees with reservation")
+    if isinstance(attempt.get("attempt"), int) and attempt.get("attempt") != data.get("attempt"):
+        errors.append(f"{task_id}: current_attempt number disagrees with reservation")
+    return data, event_dir
+
+
+def validate_attempt(base: Path, task_id: str, task: dict[str, Any], contract_path: Path | None, errors: list[str]) -> None:
     status = str(task.get("status", "")).lower()
-    attempts = task.get("transport_attempts", 0)
-    contract = task.get("current_contract") or {}
-    contract_path = contract.get("path") or task.get("contract_path") or task.get("task_path")
-
-    contract_obj: Path | None = None
-    if contract:
-        revision = contract.get("revision")
-        expected_sha = contract.get("sha256")
-        if not isinstance(revision, int) or revision < 1:
-            errors.append(f"{task_id}: current_contract requires positive integer revision")
-        if not existing(contract_path, base):
-            errors.append(f"{task_id}: current_contract path is missing")
-        elif isinstance(contract_path, str):
-            contract_obj = Path(contract_path)
-            if not contract_obj.is_absolute():
-                contract_obj = base / contract_obj
-            contract_obj = contract_obj.resolve()
-        if not isinstance(expected_sha, str) or len(expected_sha) != 64:
-            errors.append(f"{task_id}: current_contract requires sha256")
-        elif contract_obj and sha256_file(contract_obj) != expected_sha.lower():
-            errors.append(f"{task_id}: current_contract hash changed after freeze; create a new revision")
-
-    attempt = task.get("current_attempt") or {}
-    role = str(attempt.get("role") or task.get("next_role") or task.get("role") or "").lower()
-
-    if status == "prepared" and contract and contract_obj is None:
-        errors.append(f"{task_id}: prepared but immutable task contract is missing")
-
-    if task.get("decomposition_required") is True and status in {"prepared", "launching", "in-progress"}:
-        if not role:
-            errors.append(f"{task_id}: decomposition_required=true requires explicit next_role/current_attempt.role before launch")
-        elif role in ZERO_CHANGE_GUARD_ROLES:
-            errors.append(f"{task_id}: decomposition_required=true forbids another mutating launch against the current contract")
-
-    streak = task.get("zero_intended_change_streak", 0)
-    if isinstance(streak, int) and streak >= 2 and not task.get("decomposition_required"):
-        errors.append(f"{task_id}: zero_intended_change_streak >=2 requires decomposition_required=true")
-
-    reserved_report: str | None = None
-    if status in {"launching", "in-progress"}:
-        if not isinstance(attempts, int) or attempts < 1:
-            errors.append(f"{task_id}: {status} requires transport_attempts >= 1")
-        reservation_value = attempt.get("launch_reservation")
-        if not existing(reservation_value, base):
-            errors.append(f"{task_id}: {status} requires existing launch_reservation")
-        else:
-            reservation_path = Path(reservation_value)
-            if not reservation_path.is_absolute():
-                reservation_path = base / reservation_path
-            reservation_path = reservation_path.resolve()
-            expected_reservation_sha = attempt.get("launch_reservation_sha256")
-            try:
-                reservation_data = json.loads(reservation_path.read_text(encoding="utf-8"))
-            except Exception as exc:
-                errors.append(f"{task_id}: cannot validate launch_reservation: {exc}")
-            else:
-                reservation_format = reservation_data.get("format")
-                if reservation_format is None:
-                    reservation_format = "dsd-worker-launch-reservation-v1"  # pre-versioned historical fixture/state
-                if reservation_format not in {"dsd-worker-launch-reservation-v1", "dsd-worker-launch-reservation-v2"}:
-                    errors.append(f"{task_id}: unsupported launch_reservation format: {reservation_format!r}")
-                if reservation_format == "dsd-worker-launch-reservation-v2":
-                    if not isinstance(expected_reservation_sha, str) or len(expected_reservation_sha) != 64:
-                        errors.append(f"{task_id}: v15 active attempt requires launch_reservation_sha256")
-                    elif sha256_file(reservation_path) != expected_reservation_sha.lower():
-                        errors.append(f"{task_id}: immutable launch_reservation changed after state binding")
-
-                reserved_role = str(reservation_data.get("role", "")).lower()
-                if role and reserved_role != role:
-                    errors.append(f"{task_id}: launch_reservation role does not match active role")
-                attempt_number = attempt.get("attempt")
-                if isinstance(attempt_number, int) and reservation_data.get("attempt") != attempt_number:
-                    errors.append(f"{task_id}: launch_reservation attempt number does not match state")
-
-                reserved_contract = reservation_data.get("task_contract")
-                reserved_contract_sha = reservation_data.get("task_contract_sha256")
-                if contract_obj is None or not isinstance(reserved_contract, str) or Path(reserved_contract).resolve() != contract_obj:
-                    errors.append(f"{task_id}: launch_reservation task contract does not match current_contract")
-                elif not isinstance(reserved_contract_sha, str) or len(reserved_contract_sha) != 64 or sha256_file(contract_obj) != reserved_contract_sha.lower():
-                    errors.append(f"{task_id}: immutable task contract changed after reservation")
-
-                for field, digest_field in (("prompt_file", "prompt_sha256"), ("scope_baseline", "scope_baseline_sha256")):
-                    value = reservation_data.get(field)
-                    digest = reservation_data.get(digest_field)
-                    if not isinstance(value, str):
-                        errors.append(f"{task_id}: launch_reservation missing {field}")
-                        continue
-                    obj = Path(value).resolve()
-                    try:
-                        obj.relative_to(base.resolve())
-                    except ValueError:
-                        errors.append(f"{task_id}: launch_reservation {field} is outside run root")
-                    if not obj.is_file():
-                        errors.append(f"{task_id}: launch_reservation {field} is missing")
-                    elif not isinstance(digest, str) or len(digest) != 64 or sha256_file(obj) != digest.lower():
-                        errors.append(f"{task_id}: immutable {field} changed after reservation")
-
-                rules_value = reservation_data.get("worker_rules")
-                rules_sha = reservation_data.get("worker_rules_sha256")
-                if not isinstance(rules_value, str):
-                    errors.append(f"{task_id}: launch_reservation missing worker_rules")
-                else:
-                    rules_obj = Path(rules_value).resolve()
-                    if not rules_obj.is_file():
-                        errors.append(f"{task_id}: launch_reservation worker_rules missing")
-                    elif not isinstance(rules_sha, str) or len(rules_sha) != 64 or sha256_file(rules_obj) != rules_sha.lower():
-                        errors.append(f"{task_id}: immutable worker_rules changed after reservation")
-                    else:
-                        try:
-                            snapshot = verify_snapshot(rules_obj)
-                        except ValueError as exc:
-                            errors.append(f"{task_id}: worker-rules snapshot integrity failed: {exc}")
-                        else:
-                            manifest = Path(snapshot["manifest"]).resolve()
-                            reserved_manifest = reservation_data.get("worker_rules_manifest")
-                            reserved_manifest_sha = reservation_data.get("worker_rules_manifest_sha256")
-                            if not isinstance(reserved_manifest, str) or Path(reserved_manifest).resolve() != manifest:
-                                errors.append(f"{task_id}: launch_reservation worker-rules manifest does not match snapshot")
-                            elif not isinstance(reserved_manifest_sha, str) or len(reserved_manifest_sha) != 64 or sha256_file(manifest) != reserved_manifest_sha.lower():
-                                errors.append(f"{task_id}: immutable worker-rules manifest changed after reservation")
-                reserved_report = reservation_data.get("report") if isinstance(reservation_data.get("report"), str) else None
-
-        identity = attempt_pid(attempt) or attempt.get("harness_run_id") or attempt.get("session_id") or attempt.get("monitor_pid")
+    if status not in ACTIVE_ATTEMPT | POST_ATTEMPT:
+        return
+    attempt = task.get("current_attempt")
+    if not isinstance(attempt, dict):
+        errors.append(f"{task_id}: {status} requires current_attempt")
+        return
+    reservation, event_dir = load_reservation(base, task_id, task, errors)
+    if reservation is None or event_dir is None:
+        return
+    if contract_path is not None:
+        reserved_contract = resolve(base, reservation.get("task_contract"))
+        if reserved_contract is None or reserved_contract != contract_path:
+            errors.append(f"{task_id}: reservation contract disagrees with current_contract")
+        elif reservation.get("task_contract_sha256") != sha256_file(contract_path):
+            errors.append(f"{task_id}: current contract changed after launch reservation")
+    for field, digest_field in (("prompt_file", "prompt_sha256"), ("scope_baseline", "scope_baseline_sha256"), ("worker_rules", "worker_rules_sha256")):
+        raw = reservation.get(field)
+        digest = reservation.get(digest_field)
+        path = resolve(base, raw) if isinstance(raw, str) else None
+        if path is None or not path.is_file():
+            errors.append(f"{task_id}: reservation {field} missing")
+        elif not isinstance(digest, str) or len(digest) != 64 or sha256_file(path) != digest.lower():
+            errors.append(f"{task_id}: immutable {field} changed after reservation")
+    terminal = event_dir / "terminal.json"
+    if status in POST_ATTEMPT and not terminal.is_file():
+        errors.append(f"{task_id}: {status} requires terminal.json")
+    if status in ACTIVE_ATTEMPT:
+        identity = attempt.get("worker_pid") or attempt.get("monitor_pid") or attempt.get("session_id") or attempt.get("harness_run_id")
         if not identity:
-            errors.append(f"{task_id}: {status} requires real worker/monitor/session identity")
+            errors.append(f"{task_id}: {status} requires worker/session identity")
         if not attempt.get("launched_at"):
             errors.append(f"{task_id}: {status} requires launched_at")
-        if not attempt.get("terminal_event") and not attempt.get("event_dir"):
-            errors.append(f"{task_id}: {status} requires terminal_event or event_dir")
+    if status in {"gated", "report-recovery", "integrity-failed"}:
+        validate_binding(base, f"{task_id}.current_attempt.integrity_gate", attempt.get("integrity_gate"), errors)
 
-    if status == "in-progress":
-        pid = attempt_pid(attempt)
-        liveness = str(attempt.get("liveness", "")).lower() == "confirmed"
-        live = pid_alive(pid) if pid else bool(attempt.get("harness_run_id") or attempt.get("session_id") or attempt.get("monitor_pid"))
-        report_path = reserved_report or attempt.get("report_path") or task.get("report_path")
-        report_complete = bool(task.get("report_complete")) and existing(report_path, base)
-        terminal_exists = existing(attempt.get("terminal_event"), base)
-        if not ((live and liveness) or report_complete or terminal_exists):
-            errors.append(f"{task_id}: in-progress has neither confirmed live identity nor terminal/complete evidence")
 
-    if status == "waiting-for-worker":
-        if not task.get("next_probe_at"):
-            errors.append(f"{task_id}: waiting-for-worker requires next_probe_at")
-        if not task.get("worker_profile") and not task.get("role_profile"):
-            errors.append(f"{task_id}: waiting-for-worker requires a worker profile")
+def validate_last_attempt(base: Path, task_id: str, task: dict[str, Any], errors: list[str]) -> None:
+    entry = task.get("last_attempt")
+    if entry is None:
+        return
+    if not isinstance(entry, dict):
+        errors.append(f"{task_id}: last_attempt must be an object")
+        return
+    event_dir = resolve(base, entry.get("event_dir"))
+    if event_dir is None or not inside(base, event_dir):
+        errors.append(f"{task_id}.last_attempt.event_dir missing/outside run")
+        return
+    reservation = event_dir / "launch-reservation.json"
+    if not reservation.is_file():
+        errors.append(f"{task_id}.last_attempt: launch reservation missing")
+    digest = entry.get("launch_reservation_sha256")
+    if isinstance(digest, str) and len(digest) == 64 and reservation.is_file() and sha256_file(reservation) != digest.lower():
+        errors.append(f"{task_id}.last_attempt: launch reservation changed after archival")
+    status = str(entry.get("status") or "").lower()
+    terminal = event_dir / "terminal.json"
+    if status != "lifecycle-incomplete" and not terminal.is_file():
+        errors.append(f"{task_id}.last_attempt: archived {status or 'attempt'} requires terminal.json")
+    gate = entry.get("integrity_gate")
+    if gate is not None:
+        validate_binding(base, f"{task_id}.last_attempt.integrity_gate", gate, errors)
 
-    if status == "process-exited":
-        terminal = attempt.get("terminal_event")
-        if terminal and not existing(terminal, base):
-            errors.append(f"{task_id}: process-exited references missing terminal event")
-        if not terminal and not attempt.get("exited_at"):
-            errors.append(f"{task_id}: process-exited requires terminal_event or exited_at")
+def validate_task(base: Path, task_id: str, task: dict[str, Any], errors: list[str]) -> None:
+    contract = task.get("current_contract")
+    contract_path = None
+    if contract:
+        contract_path = validate_binding(base, f"{task_id}.current_contract", contract, errors)
+        revision = contract.get("revision") if isinstance(contract, dict) else None
+        if not isinstance(revision, int) or revision < 1:
+            errors.append(f"{task_id}: current_contract.revision must be positive")
+    validate_last_attempt(base, task_id, task, errors)
+    validate_attempt(base, task_id, task, contract_path, errors)
+    if str(task.get("status", "")).lower() == "accepted":
+        accepted = task.get("accepted")
+        if not isinstance(accepted, dict):
+            errors.append(f"{task_id}: accepted task requires accepted evidence bindings")
+        else:
+            validate_binding(base, f"{task_id}.accepted.source_gate", accepted.get("source_gate"), errors)
+            validate_binding(base, f"{task_id}.accepted.semantic_report", accepted.get("semantic_report"), errors)
+            validate_binding(base, f"{task_id}.accepted.semantic_gate", accepted.get("semantic_gate"), errors)
 
-    if status == "evidence-reconciliation" and not task.get("evidence_gate_path"):
-        errors.append(f"{task_id}: evidence-reconciliation requires evidence_gate_path")
 
-    return errors
+def attempt_writes_project(base: Path, task: dict[str, Any]) -> bool:
+    attempt = task.get("current_attempt")
+    if not isinstance(attempt, dict):
+        return False
+    if isinstance(attempt.get("writes_project"), bool):
+        return bool(attempt.get("writes_project"))
+    event_dir = resolve(base, attempt.get("event_dir"))
+    if event_dir is not None:
+        reservation = event_dir / "launch-reservation.json"
+        if reservation.is_file():
+            try:
+                data = json.loads(reservation.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and isinstance(data.get("writes_project"), bool):
+                    return bool(data["writes_project"])
+            except Exception:
+                return True  # fail safe while closing a phase writer barrier
+    return False
+
+
+def validate_checkpoint(base: Path, state: dict[str, Any], errors: list[str]) -> str:
+    checkpoint = state.get("context_checkpoint") or {}
+    status = str(checkpoint.get("status", "none")).lower()
+    valid = {"none", "prepared", "compacting", "rehydration-required", "resumed", "compaction-failed"}
+    if status not in valid:
+        errors.append(f"invalid context_checkpoint status: {status}")
+        return status
+    if status != "none":
+        if not checkpoint.get("sequence"):
+            errors.append(f"context_checkpoint {status} requires sequence")
+        if existing(base, checkpoint.get("checkpoint_path")) is None:
+            errors.append(f"context_checkpoint {status} requires checkpoint_path")
+        if existing(base, checkpoint.get("manifest_path")) is None:
+            errors.append(f"context_checkpoint {status} requires manifest_path")
+    if status == "resumed" and checkpoint.get("continuity_verified") is not True:
+        errors.append("context_checkpoint resumed requires continuity_verified=true")
+    return status
 
 
 def main() -> int:
@@ -225,165 +268,70 @@ def main() -> int:
     ap.add_argument("state", type=Path)
     ap.add_argument("--for-turn-exit", action="store_true")
     args = ap.parse_args()
-
     state_path = args.state.resolve()
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict):
+            raise ValueError("state is not an object")
     except Exception as exc:
         print(f"ERROR: cannot read {state_path}: {exc}", file=sys.stderr)
         return 2
-
     base = state_path.parent
     errors: list[str] = []
-    status = str(state.get("execution_status", "")).lower()
-    next_action = state.get("next_action")
+    run_status = str(state.get("execution_status", "")).lower()
+    if run_status not in TERMINAL_RUN and not str(state.get("next_action") or "").strip():
+        errors.append("active run requires next_action")
+    validate_worker_rules(base, state, errors)
+    checkpoint_status = validate_checkpoint(base, state, errors)
 
-    if status not in TERMINAL:
-        if not isinstance(next_action, str) or not next_action.strip():
-            errors.append("active run requires a non-empty string next_action")
-
-    worker_rules = state.get("worker_rules") or {}
-    if state.get("worker_runtime"):
-        rules_revision = worker_rules.get("revision")
-        if not isinstance(rules_revision, int) or rules_revision < 1:
-            errors.append("active worker runtime requires positive worker_rules.revision")
-        rules_path_value = worker_rules.get("path")
-        if not existing(rules_path_value, base):
-            errors.append("active worker runtime requires existing worker_rules.path")
-        expected_rules_sha = worker_rules.get("sha256")
-        if not isinstance(expected_rules_sha, str) or len(expected_rules_sha) != 64:
-            errors.append("active worker runtime requires worker_rules.sha256")
-        elif existing(rules_path_value, base):
-            rules_path = Path(rules_path_value)
-            if not rules_path.is_absolute():
-                rules_path = base / rules_path
-            resolved_rules = rules_path.resolve()
-            expected_rules_dir = base.resolve() / "worker-rules" / (f"r{rules_revision:04d}" if isinstance(rules_revision, int) and rules_revision >= 1 else "INVALID")
-            if resolved_rules != expected_rules_dir / "WORKER_RULES.md":
-                errors.append("worker_rules.path must identify the recorded immutable worker-rules/rNNNN/WORKER_RULES.md revision")
-            if sha256_file(resolved_rules) != expected_rules_sha.lower():
-                errors.append("worker_rules hash changed after run snapshot; create a new rules revision rather than rewriting prior worker authority")
-
-        protocol_dir_value = worker_rules.get("protocol_dir")
-        expected_protocol = worker_rules.get("protocol_fingerprint")
-        manifest_value = worker_rules.get("manifest")
-        expected_manifest_sha = worker_rules.get("manifest_sha256")
-        if not existing(protocol_dir_value, base):
-            errors.append("active worker runtime requires existing worker_rules.protocol_dir")
-        if not isinstance(expected_protocol, str) or len(expected_protocol) != 64:
-            errors.append("active worker runtime requires worker_rules.protocol_fingerprint")
-        if not existing(manifest_value, base):
-            errors.append("active worker runtime requires existing worker_rules.manifest")
-        if not isinstance(expected_manifest_sha, str) or len(expected_manifest_sha) != 64:
-            errors.append("active worker runtime requires worker_rules.manifest_sha256")
-        if existing(rules_path_value, base):
-            try:
-                snapshot = verify_snapshot(resolved_rules)
-            except ValueError as exc:
-                errors.append(f"worker-rules snapshot integrity failed: {exc}")
-            else:
-                if snapshot["protocol_dir"] != str(Path(protocol_dir_value).resolve() if Path(protocol_dir_value).is_absolute() else (base / protocol_dir_value).resolve()):
-                    errors.append("worker_rules.protocol_dir does not match immutable manifest")
-                if snapshot["protocol_fingerprint"] != str(expected_protocol).lower():
-                    errors.append("worker protocol snapshot changed after freeze; create a new worker-rules revision")
-                manifest_path = Path(snapshot["manifest"]).resolve()
-                state_manifest = Path(manifest_value) if isinstance(manifest_value, str) else Path("__missing__")
-                if not state_manifest.is_absolute():
-                    state_manifest = base / state_manifest
-                if state_manifest.resolve() != manifest_path:
-                    errors.append("worker_rules.manifest does not match immutable rules revision")
-                elif isinstance(expected_manifest_sha, str) and len(expected_manifest_sha) == 64 and sha256_file(manifest_path) != expected_manifest_sha.lower():
-                    errors.append("worker_rules manifest hash changed after freeze")
+    any_live = False
+    for phase_id, phase in (state.get("phases") or {}).items():
+        if not isinstance(phase, dict):
+            continue
+        barrier = phase.get("gate_barrier") or {}
+        barrier_status = str(barrier.get("status", "OPEN")).upper()
+        if barrier_status not in {"OPEN", "CLOSED"}:
+            errors.append(f"{phase_id}: gate_barrier.status must be OPEN or CLOSED")
+        if barrier_status == "CLOSED" and existing(base, barrier.get("snapshot")) is None:
+            errors.append(f"{phase_id}: CLOSED gate_barrier requires snapshot")
+        for task_name, task in (phase.get("tasks") or {}).items():
+            if not isinstance(task, dict):
+                continue
+            full = f"{phase_id}/{task_name}"
+            if barrier_status == "CLOSED" and str(task.get("status", "")).lower() in ACTIVE_ATTEMPT and attempt_writes_project(base, task):
+                errors.append(f"{full}: CLOSED phase barrier cannot coexist with an active project writer")
+            validate_task(base, full, task, errors)
+            attempt = task.get("current_attempt") or {}
+            if str(task.get("status", "")).lower() == "in-progress" and isinstance(attempt, dict):
+                pid = attempt.get("worker_pid") or attempt.get("monitor_pid")
+                if pid_alive(pid) or attempt.get("session_id") or attempt.get("harness_run_id"):
+                    any_live = True
 
     availability = state.get("worker_availability") or {}
     if availability.get("status") == "waiting-for-worker" and not availability.get("next_probe_at"):
         errors.append("worker_availability waiting-for-worker requires next_probe_at")
 
-    checkpoint = state.get("context_checkpoint") or {}
-    checkpoint_status = str(checkpoint.get("status", "none")).lower()
-    valid_checkpoint_statuses = {"none", "prepared", "compacting", "rehydration-required", "resumed", "compaction-failed"}
-    if checkpoint_status not in valid_checkpoint_statuses:
-        errors.append(f"invalid context_checkpoint status: {checkpoint_status}")
-    if checkpoint_status in {"prepared", "compacting", "rehydration-required", "resumed", "compaction-failed"}:
-        if not checkpoint.get("sequence"):
-            errors.append(f"context_checkpoint {checkpoint_status} requires sequence")
-        if not existing(checkpoint.get("checkpoint_path"), base):
-            errors.append(f"context_checkpoint {checkpoint_status} requires existing checkpoint_path")
-        if not existing(checkpoint.get("manifest_path"), base):
-            errors.append(f"context_checkpoint {checkpoint_status} requires existing manifest_path")
-    if checkpoint_status == "resumed" and not checkpoint.get("continuity_verified"):
-        errors.append("context_checkpoint resumed requires continuity_verified=true")
-
-    any_live = False
-    for phase_id, phase in (state.get("phases") or {}).items():
-        barrier = phase.get("gate_barrier") or {}
-        phase_status = str(phase.get("status", "")).lower()
-        if phase_status in {"auditing", "gate-due", "gating"}:
-            if str(barrier.get("status", "")).upper() != "CLOSED":
-                errors.append(f"{phase_id}: phase audit/gate requires CLOSED gate_barrier")
-            snapshot = barrier.get("snapshot")
-            if not snapshot:
-                errors.append(f"{phase_id}: CLOSED audit/gate barrier requires snapshot")
-            elif not existing(snapshot, base):
-                errors.append(f"{phase_id}: CLOSED audit/gate barrier snapshot is missing")
-
-        for task_id, task in (phase.get("tasks") or {}).items():
-            if not isinstance(task, dict):
-                continue
-            full_id = f"{phase_id}/{task_id}"
-            errors.extend(validate_task(full_id, task, base, worker_rules))
-            attempt = task.get("current_attempt") or {}
-            task_status = str(task.get("status", "")).lower()
-            active_role = str(attempt.get("role") or task.get("next_role") or "").lower()
-            if phase_status in {"auditing", "gate-due", "gating"} and task_status in {"launching", "in-progress"}:
-                writes_project = bool(attempt.get("writes_project")) or role_is_project_writer(active_role, [])
-                if not writes_project and active_role:
-                    contract = task.get("current_contract") or {}
-                    contract_path = Path(str(contract.get("path", ""))) if isinstance(contract, dict) else None
-                    if contract_path and not contract_path.is_absolute():
-                        contract_path = base / contract_path
-                    if contract_path and contract_path.is_file():
-                        try:
-                            writes_project = role_is_project_writer(
-                                active_role,
-                                allowed_source_changes(contract_path.read_text(encoding="utf-8", errors="replace")),
-                            )
-                        except (OSError, ValueError):
-                            writes_project = task_declares_project_writes(task, base)
-                if writes_project:
-                    errors.append(f"{full_id}: phase barrier cannot be CLOSED while a project-writing attempt is active")
-            if task_status == "in-progress" and str(attempt.get("liveness", "")).lower() == "confirmed":
-                pid = attempt_pid(attempt)
-                if pid:
-                    any_live = any_live or pid_alive(pid)
-                else:
-                    any_live = any_live or bool(attempt.get("harness_run_id") or attempt.get("session_id") or attempt.get("monitor_pid"))
-
-    if args.for_turn_exit and status not in TERMINAL:
+    if args.for_turn_exit and run_status not in TERMINAL_RUN:
         waiting = availability.get("status") == "waiting-for-worker" and bool(availability.get("next_probe_at"))
-        compacting = checkpoint_status == "compacting" and bool(checkpoint.get("compacting_at") or checkpoint.get("compaction_requested_at"))
-        host_wait_state = state.get("orchestrator_wait") or {}
-        host_wait = bool(host_wait_state.get("active"))
-        if host_wait:
-            terminal_value = host_wait_state.get("terminal_event")
-            if not isinstance(terminal_value, str) or not terminal_value.strip():
+        compacting = checkpoint_status == "compacting"
+        host_wait = state.get("orchestrator_wait") or {}
+        active_wait = bool(host_wait.get("active"))
+        if active_wait:
+            terminal = resolve(base, host_wait.get("terminal_event"))
+            if terminal is None:
                 errors.append("active orchestrator_wait requires terminal_event")
-                host_wait = False
-            else:
-                terminal_path = Path(terminal_value)
-                if not terminal_path.is_absolute():
-                    terminal_path = base / terminal_path
-                if terminal_path.exists():
-                    errors.append("orchestrator_wait is still active but terminal_event already exists; process the event before yielding")
-                    host_wait = False
-                monitor_pid = host_wait_state.get("monitor_pid")
-                if monitor_pid is not None and not pid_alive(monitor_pid):
-                    errors.append("active orchestrator_wait monitor_pid is not alive and no terminal event exists")
-                    host_wait = False
-        if not any_live and not waiting and not compacting and not host_wait:
-            errors.append("turn-exit invariant failed: active run has no live worker, host wait, persisted availability wait, or active compaction")
+                active_wait = False
+            elif terminal.exists():
+                errors.append("orchestrator_wait still active after terminal event; process the event before yielding")
+                active_wait = False
+            monitor = host_wait.get("monitor_pid")
+            if monitor is not None and not pid_alive(monitor):
+                errors.append("orchestrator_wait monitor is not alive")
+                active_wait = False
+        if not (any_live or waiting or compacting or active_wait):
+            errors.append("turn-exit invariant failed: no live worker, active wait/backoff, or compaction")
         if checkpoint_status in {"prepared", "rehydration-required"}:
-            errors.append(f"turn-exit invariant failed: checkpoint is {checkpoint_status}; complete compaction/rehydration first")
+            errors.append(f"turn-exit invariant failed: checkpoint is {checkpoint_status}")
 
     if errors:
         for error in errors:

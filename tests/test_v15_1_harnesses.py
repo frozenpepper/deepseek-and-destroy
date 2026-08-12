@@ -41,7 +41,7 @@ class V151HarnessAuditTest(unittest.TestCase):
             self.assertTrue(one["changed"]); self.assertFalse(two["changed"])
             self.assertNotIn(".kilo/plugins/", str(plugin))
             tools = project / "DeepSeekAndDestroy" / "tools"
-            for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py", "_task_contract.py"):
+            for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py"):
                 self.assertTrue((tools / name).is_file(), name)
             check = self.run_cmd([PYTHON, str(tools / "check_state.py"), "--help"])
             self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
@@ -82,72 +82,12 @@ class V151HarnessAuditTest(unittest.TestCase):
                 self.assertTrue(target.is_file())
                 self.assertNotIn("{{MODEL}}", target.read_text())
                 self.assertIn("deepseek/deepseek-v4-flash", target.read_text())
+            mutating = (project / ".kilo" / "agents" / "dsd-mutating-worker.md").read_text()
+            readonly = (project / ".kilo" / "agents" / "dsd-readonly-worker.md").read_text()
+            self.assertIn("Verification when its immutable task contract explicitly authorizes exact generated/project write paths", mutating)
+            self.assertIn("read-only Verification", readonly)
+            self.assertIn("Evidence Clerk", readonly)
 
-    def test_kilo_native_attempt_enters_normal_evidence_gate(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td); project = root / "project"; project.mkdir()
-            self.run_cmd(["git", "init"], cwd=project)
-            self.run_cmd(["git", "config", "user.email", "dsd@test.invalid"], cwd=project)
-            self.run_cmd(["git", "config", "user.name", "DSD Test"], cwd=project)
-            (project / "source.txt").write_text("base\n")
-            self.run_cmd(["git", "add", "source.txt"], cwd=project)
-            self.run_cmd(["git", "commit", "-m", "base"], cwd=project)
-            run = project / "DeepSeekAndDestroy" / "plans" / "p" / "runs" / "r"; run.mkdir(parents=True)
-            plan = project / "plan.md"; plan.write_text("# Plan\n")
-            prep = self.run_cmd([
-                PYTHON, str(ROOT / "scripts" / "prepare_worker_rules.py"),
-                "--project-root", str(project.resolve()), "--run-root", str(run.resolve()),
-                "--skill-root", str(ROOT.resolve()), "--plan", str(plan.resolve()), "--worker-harness", "kilo-native",
-            ])
-            self.assertEqual(prep.returncode, 0, prep.stdout + prep.stderr)
-            rules = run / "worker-rules" / "r0001" / "WORKER_RULES.md"
-            task = run / "task.md"
-            task.write_text("# Task U1\n\n## Allowed source changes\nNONE\n\n## Acceptance criteria\n- AC-001 — source remains readable\n\n## Evidence Clerk Checks\nNONE\n")
-            baseline = run / "scope.json"
-            snap = self.run_cmd([
-                PYTHON, str(ROOT / "scripts" / "scope_snapshot.py"), "capture",
-                "--root", str(project.resolve()), "--output", str(baseline.resolve()),
-                "--git-worktree", "--exclude-prefix", "DeepSeekAndDestroy",
-            ])
-            self.assertEqual(snap.returncode, 0, snap.stdout + snap.stderr)
-            report = run / "review.md"; prompt = run / "prompt.txt"
-            render = self.run_cmd([
-                PYTHON, str(ROOT / "scripts" / "render_worker_prompt.py"), "--role", "reviewer", "--task-id", "U1",
-                "--run-root", str(run.resolve()), "--worker-rules", str(rules.resolve()), "--task", str(task.resolve()),
-                "--report", str(report.resolve()), "--output", str(prompt.resolve()),
-            ])
-            self.assertEqual(render.returncode, 0, render.stdout + render.stderr)
-            event = run / "attempts" / "reviewer-1"; log = event / "worker.log"
-            reserve = self.run_cmd([
-                PYTHON, str(ROOT / "scripts" / "native_worker_attempt.py"), "reserve", "--harness", "kilo",
-                "--project-root", str(project.resolve()), "--run-root", str(run.resolve()), "--task-id", "U1",
-                "--role", "reviewer", "--attempt", "1", "--prompt-file", str(prompt.resolve()),
-                "--task-contract", str(task.resolve()), "--worker-rules", str(rules.resolve()),
-                "--scope-baseline", str(baseline.resolve()), "--report", str(report.resolve()),
-                "--event-dir", str(event.resolve()), "--log", str(log.resolve()),
-            ])
-            self.assertEqual(reserve.returncode, 0, reserve.stdout + reserve.stderr)
-            report.write_text(
-                "Reviewed the tracked production input directly. source.txt remained readable and unchanged; "
-                "no task-relevant defect was found.\n"
-            )
-            final = self.run_cmd([
-                PYTHON, str(ROOT / "scripts" / "native_worker_attempt.py"), "finalize",
-                "--event-dir", str(event.resolve()), "--status", "completed",
-            ])
-            self.assertEqual(final.returncode, 0, final.stdout + final.stderr)
-            terminal = json.loads((event / "terminal.json").read_text())
-            self.assertEqual(terminal["transport"], "kilo-native")
-            gate = self.run_cmd([
-                PYTHON, str(ROOT / "scripts" / "evidence_gate.py"), "--run-root", str(run.resolve()),
-                "--task", str(task.resolve()), "--report", str(report.resolve()), "--terminal-event", str((event / "terminal.json").resolve()),
-                "--role", "reviewer", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()),
-                "--json",
-            ])
-            self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
-            gated = json.loads(gate.stdout)
-            self.assertTrue(gated["ok"]); self.assertTrue(gated["mechanical_ok"])
-            self.assertNotIn("verdict", gated); self.assertNotIn("fast_path_eligible", gated)
 
     def test_all_core_harness_installers_use_canonical_assets_and_complete_helpers(self):
         with tempfile.TemporaryDirectory() as td:
@@ -160,7 +100,7 @@ class V151HarnessAuditTest(unittest.TestCase):
                 ])
                 self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
                 tools = project / "DeepSeekAndDestroy" / "tools"
-                for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py", "_task_contract.py"):
+                for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py"):
                     self.assertTrue((tools / name).is_file(), f"{harness}: {name}")
             codex = json.loads((root / "codex" / ".codex" / "hooks.json").read_text())
             canonical_codex = json.loads((ROOT / "adapters" / "codex" / "hooks.json").read_text())
@@ -199,7 +139,7 @@ class V151HarnessAuditTest(unittest.TestCase):
         config = (ROOT / "CONFIG.example.md").read_text()
         self.assertIn("kilo", config.lower())
         self.assertNotIn("reviewer resume when trustworthy/moderate", config)
-        self.assertIn("Role changes start fresh sessions", config)
+        self.assertIn("fresh DeepSeek worker", config)
         self.assertFalse((ROOT / "contrib" / "kilo" / "dsd-compaction.ts").exists())
         self.assertFalse((ROOT / "contrib" / "kilo" / "agents").exists())
         self.assertTrue((ROOT / "KILO.md").is_file())

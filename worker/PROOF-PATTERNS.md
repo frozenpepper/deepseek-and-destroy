@@ -1,28 +1,14 @@
-# DSD Proof Recipes
+# Optional DSD Proof Patterns
 
-Load this file only when the task names a recipe under `## Proof patterns`.
+Load this file only when the task contract names a pattern. These are reasoning recipes, not parser grammar.
 
-## NEGATIVE-GATE
-Prove one realistic allowed input reaches/passes the named gate and one realistic
-invalid input reaches/is rejected **by that gate**, using authority independent of
-the object being gated. A gate that cannot realistically say no is not proven.
+- **DURABILITY** — prove state with a genuinely fresh instance/process/restart; same-instance memory is not enough.
+- **FAIL-CLOSED** — exercise a realistic invalid/partial input and show the intended safe behavior rather than merely an exception path.
+- **INTEGRATION** — reach the real public/runtime wiring, not only an isolated helper.
+- **EXCLUSIVITY** — demonstrate both allowed and forbidden/competing paths when the claim is “only/never/exactly one”.
+- **IDEMPOTENCE** — repeat the operation and show the second execution preserves the contract.
+- **CONCURRENCY** — challenge ordering/race/duplicate invocation with evidence that distinguishes serialized success from accidental timing.
+- **PRESERVATION** — compare accepted before/after behavior/artifacts without silently rewriting expected evidence.
+- **PROVENANCE** — establish that evidence came from the claimed attempt/source rather than a stale/copied artifact.
 
-## CARDINALITY
-For collection/batch/fan-out behavior, exercise a relevant `>1` case and assert
-individual mappings/relationships, not only totals. Evidence must fail for plausible
-"last item wins" or "all children attach to one parent" defects.
-
-## IDENTITY
-Where correctness depends on references/ownership, assert the project's canonical
-identities. Names, prefixes, order, proximity, and display labels are not identity
-unless the governing schema explicitly makes them so.
-
-## DURABILITY
-Cross the actual persistence/restart boundary. For restart durability: instance A
-writes, A is discarded, fresh instance B starts from durable state and reconstructs
-correctly. Same-instance continuation is insufficient.
-
-## DERIVED-EVIDENCE
-For generated matrices/dashboards/gates, each distinct green claim needs the
-predicate its contract names. One aggregate predicate may serve multiple claims only
-when their contracts are truly identical.
+Use only patterns relevant to the task. Prefer one discriminating counterexample over many weak checks.

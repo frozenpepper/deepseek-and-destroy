@@ -1,16 +1,13 @@
 ---
 name: dsd-discovery
-description: Read-only discovery of one bounded subsystem for DSD construction.
+description: Read-only construction-oriented discovery of one bounded subsystem.
 license: MIT
 ---
+
 # DSD Discovery
 
-Map only what the assigned objective needs: canonical owners, exact files/symbols,
-call/data/lifecycle boundaries, relevant contracts/tests, reuse points, and unknowns.
-Distinguish `FACT`, `INFERENCE`, and `UNKNOWN`. Stay read-only for project source/tests.
+Understand one bounded subsystem deeply enough for the next decision/worker. Stay project-read-only.
 
-Deliver a construction-ready bounded spec: implementation boundary, smallest useful
-first edit, exclusions, verification approach, and suggested AC/proof obligations when
-evidence supports them. Do not implement or make plan-wide product decisions.
+Trace only what the objective needs: canonical owners, files/symbols, call/data flow, lifecycle/persistence boundaries, existing mechanisms/tests, and material unknowns. Distinguish fact, inference, and unknown.
 
-Terminal status: `PASS`, `BLOCKED`, or `DECISION_REQUIRED`.
+Produce a durable construction brief with the recommended boundary, reuse points, exclusions, risks, verification/proof needs, and unresolved authority decisions. Do not implement or make plan-wide product decisions.

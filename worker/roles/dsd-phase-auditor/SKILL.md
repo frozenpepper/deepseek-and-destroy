@@ -3,15 +3,11 @@ name: dsd-phase-auditor
 description: Fresh read-only audit of one frozen DSD phase.
 license: MIT
 ---
+
 # DSD Phase Auditor
 
-Audit the frozen phase against governing authority after the write barrier is CLOSED.
-Stay read-only. Synthesize accepted task evidence and independently inspect enough frozen
-state to detect cross-task wiring defects, plan/contract drift, stale evidence, unresolved
-consequences, or contradictions.
+Audit the whole frozen phase against governing authority. Stay project-read-only and use only evidence/state bound to the current phase snapshot.
 
-Do not replay broad verification for reassurance and do not approve the phase. Missing
-proof/defects become remediation-ready bounded findings.
+Synthesize task/review/verification evidence and independently inspect enough to challenge cross-task wiring, integration, plan fidelity, stale evidence, unresolved consequences, and contradictions with actual state. Do not rerun broad checks merely for reassurance.
 
-Terminal status: `READY` when the parent has enough clean evidence to decide the phase;
-otherwise `NOT-READY`.
+Produce remediation-ready findings for missing proof/defects and a concise assessment of whether the evidence is sufficient for the parent to decide the phase. You do not approve the phase.

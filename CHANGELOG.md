@@ -1,74 +1,52 @@
 # Changelog
 
-## v15.3 — Context-economy consolidation and semantic-boundary completion
+## v15.4.1 — Attempt lifecycle and run-root binding hardening
 
-- completed the v15 Evidence Clerk architecture: long worker prose is no longer a
-  machine acceptance protocol; deterministic gates prove objective attempt/scope facts
-  only, while semantic adequacy stays with LLMs and the premium parent;
-- removed `check_review_contract.py` and `_report_contract.py`; removed obsolete
-  reviewer/Clerk semantic gate flags rather than silently pretending they still check
-  meaning;
-- renamed the bounded non-authoritative report preview helper to `report_surface.py` to
-  avoid implying decision authority;
-- added `dsd_attempt.py launch|gate`, a thin transaction facade that derives attempt
-  paths/config, scope baseline, prompt, reservation, launch, gate artifacts and routine
-  state bookkeeping without choosing roles, retries, semantics or acceptance;
-- made attempts self-contained under `attempts/<role>-<n>/` and clean up pre-launch
-  helper failures before an immutable reservation exists;
-- made Evidence Clerk always project-read-only; project documentation mutation is a
-  normal bounded writer task, while Verification remains conditionally writable only
-  for explicit generated/project paths;
-- reduced worker context to run rules + COMMON + one role + task; proof recipes are
-  loaded only when explicitly named, and prior evidence is passed by immutable path +
-  SHA-256 rather than copied prose;
-- compressed parent/worker/harness doctrine and moved recovery/barrier/transport/
-  compaction details behind lazy-loaded references;
-- replaced legacy tests that encoded Verdict markers, Proof Matrices, arithmetic parsing
-  and Clerk overlays as correctness with objective-mechanics and natural-report
-  regressions;
-- added an end-to-end natural-prose Reviewer regression proving that a report with no
-  ceremonial verdict/table/finality syntax still passes the mechanical gate cleanly.
+- Fixed run-relative state/attempt paths to resolve against the DSD run root rather than the caller's process cwd, including resumed/legacy `current_contract.path` bindings.
+- Added pre-launch state/lifecycle preflight so known state-binding failures are detected before starting a new worker. High-level launch now always starts the detached low-level monitor, binds the live attempt immediately, and only then waits internally when foreground behavior was requested; `wait` refreshes state to `process-exited`.
+- Added bounded factual `last_attempt`; binding a new role automatically moves the prior terminal/gated attempt there instead of overwriting its only state pointer or calling it `retired-unaccepted`. Full history remains cold in immutable attempt directories.
+- Allowed gates to bind to either the current attempt or the matching archived immutable attempt.
+- Kept reportless terminal attempts representable as `report-recovery`. Added an explicit exceptional `--supersede-incomplete` path for terminal-less attempts; it records `lifecycle-incomplete`/`superseded` honestly and refuses when a recorded worker/monitor is still alive.
+- Added lifecycle regression coverage for all of the above.
 
-## v15.2 — Orchestrator secretarial-work elimination
+## v15.4 — Context-economy consolidation and strict semantic/mechanical boundary
 
-Field feedback from a Claude Opus orchestration run showed that v15.1 preserved
-strong evidence semantics but leaked mechanical serialization back into premium
-context. v15.2 fixes the abstraction boundary rather than adding another worker
-ritual:
+- Made Evidence Clerk **optional at parent semantic-consumption boundaries**. Implementer/Fixer normally flow directly to fresh Reviewer; Clerk is never inserted merely because it exists.
+- Made Evidence Clerk always project-read-only. Missing technical predicates route to Verification/Review; project documentation changes are ordinary writer tasks.
+- Removed task-level Clerk-check semantics and all remaining executable verdict/AC/defect/arithmetic/Proof-Matrix interpretation. Obsolete semantic-gate flags fail instead of becoming misleading no-ops.
+- Reduced worker context to immutable run facts + Common + one role + task; proof recipes load only when explicitly named and never for Clerk.
+- Made new attempts self-contained under `attempts/<role>-<n>/`; `dsd_attempt.py` owns normal launch/wait/gate bookkeeping.
+- Made gate stdout mechanics-only by default; `--surface` explicitly opts in to a bounded non-semantic report prefix at a parent decision boundary, preventing intermediate worker prose from leaking into premium context.
+- Retired the multi-argument contract authoring interface. `render_task_contract.py` accepts one JSON spec (`--spec FILE|-`) so premium models cannot fall back to dozens of shell arguments.
+- Simplified state to durable facts and exact `next_action`; removed semantic/routing/no-progress bookkeeping from new state.
+- Kept deterministic enforcement only for objective integrity: immutable authority, lifecycle, exact scope movement, ignored load-bearing roots, read-only/write boundaries, fresh Reviewer provenance after mutation, phase freeze, and resume authority continuity.
+- Split Kilo's optional native-worker detail out of the hot parent adapter and substantially shortened `SKILL.md`, `WORKSPACE.md`, `OPENCODE.md`, and `COMPACTION.md`.
 
-- `render_task_contract.py` now accepts a JSON spec file or stdin while retaining
-  the legacy slot CLI; it can use `DSD_RUN_ROOT` and run-relative output paths, and
-  optional role preflight rejects Evidence-Clerk recursion.
-- added `dsd_state.py` for validated atomic `bind-contract`, `bind-attempt`, `accept`,
-  and `set-next` transitions instead of repeated state heredocs.
-- centralized report wire parsing in `_report_contract.py` and task-contract field
-  parsing in `_task_contract.py`; gates accept harmless bullet/bold decoration and
-  descriptive labels after Proof Matrix AC ids without duplicating private grammar.
-- Reviewer task AC discovery is now scoped strictly to `## Acceptance criteria`, so
-  AC ids mentioned in objectives/inputs cannot contaminate the review contract.
-- published the canonical report wire grammar in worker `COMMON.md`, including the
-  stable Clerk-check-id requirement; validator archaeology is no longer a startup
-  task.
-- Evidence Clerk attempts no longer self-route because their own contract happens to
-  contain an `Evidence Clerk Checks` section; the renderer rejects that combination
-  when the intended role is known, while the gate treats it as nonrecursive.
-- Verification is conditionally writable when and only when its immutable contract
-  has non-empty `Allowed source changes`, covering generated accepted artifacts
-  without adding a redundant specialist role.
-- `scope_snapshot.py --extra-inventory` now captures and re-enumerates Git-ignored
-  load-bearing roots; `--task-contract` imports the contract declaration automatically
-  and `evidence_gate.py` rejects baselines that omit required roots.
-- documented the report-only same-role correction pattern for the rare missing
-  semantic field that a Clerk cannot invent; Clerk-normalizable formatting still
-  does not consume a new semantic worker run.
-- `evidence_gate.py` accepts run-relative artifact paths and normalizes them before
-  immutable binding checks; Claude multi-run resume guidance explicitly uses
-  `DSD_RUN_ROOT` rather than guessing.
-- added focused v15.2 regressions for JSON contracts, parser tolerance/AC isolation,
-  ignored-tree additions, state transactions, and conditional Verification writes.
-- tightened parent doctrine around compact recommended adjudications instead of
-  presenting routine decision menus, while preserving human escalation for true
-  authorization/intent boundaries.
+## v15.3 — Finish the Clerk architecture; remove deterministic prose adjudication
+
+- Finished the v15 design instead of merely relaxing its regexes: `evidence_gate.py` is now an integrity-only envelope for immutable authority, lifecycle, report artifact state, worker-rules integrity, and project scope movement. It does not interpret worker conclusions, AC coverage, Proof Matrix shape, defect prose, or test arithmetic.
+- Removed `check_review_contract.py`, `_report.py`, and `decision_packet.py` from the live control path. Python no longer pretends that regex presence proves engineering review quality.
+- Made worker reports explicitly natural semantic artifacts. Exact `Verdict:`/FINAL/Decision Packet/Proof Matrix/test-count/Clerk-id serialization is guidance only, never an acceptance grammar.
+- Promoted Evidence Clerk from exceptional formatting repair to the normal semantic bridge protecting premium context. `dsd_attempt.py interpret` launches a fresh Clerk over the exact source task, source report, and clean integrity gate without hand-authoring a second Clerk contract.
+- Removed the old Clerk-overlay/re-gate protocol and semantic `fast_path_eligible` derivation. Clerk output is itself mechanically integrity-gated, then read directly by the premium parent.
+- Changed task acceptance so Python records—but never infers—the premium parent's semantic verdict. `dsd_state.py accept-task` now binds the source integrity gate plus the exact semantic-evidence report (normally Clerk) and that report's clean integrity gate.
+- Removed stable Clerk-check-id enforcement and made AC ids an authoring convenience: JSON acceptance items without an `AC-*` prefix receive stable ids automatically at render time.
+- Simplified the launcher report placeholder so it contains no fake semantic verdict or defects; the integrity gate recognizes it by the reservation-bound hash.
+- Kept deterministic mechanisms only where they establish objective facts: exact write scopes, ignored-tree inventories, immutable hashes/bindings, lifecycle, concurrency-relevant worktree movement, zero-change guard, phase barrier, and resume authority continuity.
+
+## v15.2 — Premium-control serialization and tolerant gate cleanup
+
+- Added JSON/stdin task specs to `render_task_contract.py`; contract semantics no longer need 40–80 hand-authored shell arguments.
+- Added `dsd_state.py` named atomic transitions so routine contract/attempt/accept/next-action bookkeeping no longer requires hand-written `state.json` heredocs.
+- Added `dsd_attempt.py` for the normal external-OpenCode path: derive attempt/report/log/prompt paths and run runtime from state, capture the task-bound scope baseline, render the handoff, launch, bind lifecycle state, and later gate the current terminal attempt with short commands.
+- Relaxed report parsing around Markdown decoration (`- **Verdict: PASS**`, descriptive Proof Matrix AC cells, etc.) while keeping role-valid semantic verdicts and missing AC proof strict. Acceptance ACs are now extracted only from the `Acceptance criteria` section, preventing quoted foreign AC ids from becoming phantom obligations.
+- Removed FINAL-marker clerical routing for substantive exact-attempt reports; process/native Task terminal lifecycle is the finality authority. Missing/untouched launcher skeletons still fail closed into recovery.
+- Made Evidence Clerk self-recursion a launch-time contract error; historical malformed Clerk contracts no longer recursively request another Clerk at gate time. Vague/legacy Clerk requests receive stable built-in reconciliation ids rather than burning a worker rerun for formatting.
+- Added first-class ignored/load-bearing `Extra scope inventory` support to task specs and scope baselines, including explicit added/removed/modified reporting for Git-ignored trees.
+- Made Verification conditionally artifact-mutating only when exact generated-artifact `Allowed source changes` are declared; otherwise it remains mechanically read-only and any source movement fails hard.
+- Corrected Evidence Clerk capability classification: evidence-only Clerk attempts are read-only; a Clerk becomes a project writer only when its exact contract declares an allowed documentation path.
+- Allowed run-relative evidence-gate paths and improved multi-run resume selection by preferring the unique checkpoint-requiring run when session binding is unavailable.
+- Kept the high-value field-proven safeguards unchanged: immutable attempt authority, full scope tripwire, fresh adversarial review, Recovery, two-zero-change guard, phase barrier, and `DECISION_REQUIRED`.
 
 ## v15.1 — Kilo restoration and orphan-surface audit
 

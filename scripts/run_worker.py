@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from _contract import role_writes_project, validate_role_contract
 from _roles import ROLE_NAMES
 from _rules_snapshot import sha256_file, verify_snapshot
 
@@ -70,11 +71,14 @@ def lookup_session_id(env: dict[str, str], title: str) -> tuple[str | None, str 
 
 
 def skeleton_text(evidence_dir: Path) -> str:
-    # Identity belongs to the launch reservation, not to worker-authored prose.
+    # A byte-distinct placeholder lets the integrity gate detect a report that was
+    # never written, without embedding fake semantic conclusions into the file.
     return "\n".join([
-        "# DSD worker report",
-        "PENDING — launcher skeleton; worker has not written substantive evidence.",
-        f"Attempt artifacts: {evidence_dir}",
+        "# DSD worker report placeholder",
+        "DSD_WORKER_REPORT_PLACEHOLDER_V1",
+        "The launcher created this placeholder before work began.",
+        "The worker has not replaced it with a substantive report.",
+        f"Attempt evidence directory: {evidence_dir}",
         "",
     ])
 
@@ -110,6 +114,10 @@ def resolve_preflight(args: argparse.Namespace) -> tuple[dict[str, Path] | None,
         return None, f"prompt file missing: {paths['prompt']}"
     if not paths["task_contract"].is_file():
         return None, f"task contract missing: {paths['task_contract']}"
+    task_text = paths["task_contract"].read_text(encoding="utf-8", errors="replace")
+    role_contract_errors = validate_role_contract(args.role, task_text)
+    if role_contract_errors:
+        return None, "; ".join(role_contract_errors)
     if not paths["worker_rules"].is_file():
         return None, f"worker rules missing: {paths['worker_rules']}"
     if paths["worker_rules"].name != "WORKER_RULES.md":
@@ -163,11 +171,13 @@ def reserve_attempt(args: argparse.Namespace, paths: dict[str, Path]) -> tuple[s
     reserved_at = now()
     skeleton = skeleton_text(event_dir).encode("utf-8")
     skeleton_sha = hashlib.sha256(skeleton).hexdigest()
+    task_text = paths["task_contract"].read_text(encoding="utf-8", errors="replace")
     payload = {
         "format": "dsd-worker-launch-reservation-v2",
         "task_id": args.task_id,
         "role": args.role,
         "attempt": args.attempt,
+        "writes_project": False if getattr(args, "force_read_only", False) else role_writes_project(args.role, task_text),
         "report": str(report),
         "log": str(log),
         "report_skeleton_sha256": skeleton_sha,
@@ -286,6 +296,7 @@ def child_run(args: argparse.Namespace, paths: dict[str, Path], reserved_at: str
             "reserved_at": reserved_at,
             "started_at": started,
             "resume_session": args.resume_session,
+            "writes_project": bool(json.loads(reservation_path.read_text(encoding="utf-8")).get("writes_project")),
         }
         atomic_json(event_dir / "attempt.json", attempt_data)
         rc = proc.wait()
@@ -335,6 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--model", default="opencode-go/deepseek-v4-flash")
     ap.add_argument("--title")
     ap.add_argument("--resume-session", help="same-role transport/session continuation only; normal cross-role transitions start fresh")
+    ap.add_argument("--force-read-only", action="store_true", help="reserve this attempt as project-read-only regardless of task write scope; used by routine Evidence Clerk interpretation")
     ap.add_argument("--auto-flag", default="--auto", help="OpenCode permission flag; pass empty string to omit")
     ap.add_argument("--detach", action="store_true", help="spawn the monitor in a detached process and return")
     ap.add_argument("--_child", action="store_true", help=argparse.SUPPRESS)

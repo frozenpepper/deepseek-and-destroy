@@ -4,7 +4,7 @@ Kilo Code is a first-class DSD harness in this release. Canonical documentation 
 assets moved to:
 
 - `../../KILO.md`
-- `../../adapters/kilo/`
+- `../../adapters/kilo/README.md` and `../../adapters/kilo/` assets
 - `../../scripts/install_kilo_workers.py`
 - `../../scripts/install_harness_adapter.py --harness kilo`
 

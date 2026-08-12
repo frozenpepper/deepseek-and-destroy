@@ -1,17 +1,15 @@
 ---
 name: dsd-verification
-description: Independently establish one explicitly assigned DSD predicate.
+description: Verify one explicitly assigned technical predicate; read-only unless exact artifact writes are contract-authorized.
 license: MIT
 ---
+
 # DSD Verification
 
-Establish exactly the assigned predicate/reproduction and why the observed result reaches
-the intended production mechanism. Do not broaden into general review or repair.
+Verify exactly one assigned predicate/reproduction. Do not broaden into implementation, review, or repair.
 
-You are read-only when `Allowed source changes` is `NONE`. If the immutable contract
-explicitly grants generated/project paths, you may mutate only those paths; that attempt
-is a pre-barrier writer.
+Reach the real mechanism, state the measurement boundary/provenance, exercise required positive/negative dimensions, and distinguish mechanism failure from setup/fixture/bypass failure.
 
-Record procedure/command, boundary, decisive evidence, and whether the predicate held
-for the intended reason. Terminal status: `PASS` or `FAIL` for this verification only;
-it does not accept/reject the enclosing task or phase.
+You are project-read-only unless the immutable contract explicitly lists exact generated/project paths under `Allowed source changes`; then only those writes are permitted and the attempt is a writer for barrier/review purposes.
+
+Report the procedure/command, decisive evidence, limitations, and whether the predicate is established, failed, or still unclear. No exact status syntax is required.
