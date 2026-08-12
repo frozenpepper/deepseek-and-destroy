@@ -232,15 +232,11 @@ def launch(args: argparse.Namespace) -> int:
                     sys.stderr.write(cp.stderr)
                 return cp.returncode
 
-        # Keep premium-facing stdout tiny. Full launcher/state detail is durable on disk.
+        # Premium-facing stdout is status only. Full detail is durable in the attempt directory/state.
         result = {
-            "format": "dsd-attempt-launch-v3",
-            "launcher_exit_code": cp.returncode,
-            "role": role,
-            "attempt": attempt,
+            "status": "started" if args.detach else "waiting",
+            "attempt": f"{role}-{attempt}",
             "event_dir": str(event_dir),
-            "report": str(report),
-            "terminal_event": str(event_dir / "terminal.json"),
         }
         rc = cp.returncode
         if cp.returncode == 0 and not args.detach:
@@ -252,8 +248,9 @@ def launch(args: argparse.Namespace) -> int:
                 wait_data = json.loads(wait_cp.stdout) if wait_cp.stdout.strip() else {}
             except json.JSONDecodeError:
                 wait_data = {}
-            result["wait_status"] = wait_data.get("status")
-            result["worker_exit_code"] = wait_data.get("exit_code")
+            result["status"] = wait_data.get("status") or "terminal"
+            if wait_data.get("exit_code") is not None:
+                result["exit_code"] = wait_data.get("exit_code")
             if wait_cp.returncode in {0, 1}:
                 refresh = subprocess.run([
                     sys.executable, str(scripts / "dsd_state.py"), "bind-attempt",
@@ -359,17 +356,13 @@ def gate(args: argparse.Namespace) -> int:
                     except Exception:
                         surface_lines = []
             summary = {
-                "format": "dsd-attempt-gate-v2",
-                "integrity_ok": gate_data.get("integrity_ok"),
-                "ready_for_interpretation": gate_data.get("ready_for_interpretation"),
-                "needs_report_recovery": gate_data.get("needs_report_recovery"),
-                "role": gate_data.get("role"),
+                "integrity_ok": gate_data.get("integrity_ok") is True,
                 "gate": str(output),
-                "report": gate_data.get("report"),
-                "scope_changed_count": (gate_data.get("scope") or {}).get("changed_count"),
-                "errors": gate_data.get("errors", []),
-                "warnings": gate_data.get("warnings", []),
             }
+            if gate_data.get("needs_report_recovery") is True:
+                summary["report_recovery"] = True
+            if gate_data.get("errors"):
+                summary["errors"] = gate_data.get("errors")
             if args.surface:
                 summary["report_surface"] = surface_lines
             print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
@@ -403,7 +396,15 @@ def wait(args: argparse.Namespace) -> int:
                 sys.stderr.write(refresh.stderr)
             return refresh.returncode
     if cp.stdout.strip():
-        sys.stdout.write(cp.stdout)
+        try:
+            waited = json.loads(cp.stdout)
+        except json.JSONDecodeError:
+            sys.stdout.write(cp.stdout)
+        else:
+            compact = {"status": waited.get("status")}
+            if waited.get("exit_code") is not None:
+                compact["exit_code"] = waited.get("exit_code")
+            print(json.dumps(compact, sort_keys=True, separators=(",", ":")))
     if cp.stderr.strip():
         sys.stderr.write(cp.stderr)
     return cp.returncode

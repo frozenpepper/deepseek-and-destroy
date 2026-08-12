@@ -63,7 +63,9 @@ class V154ConsolidationTest(unittest.TestCase):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         clerk = (ROOT / "worker" / "roles" / "dsd-evidence-clerk" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("only if useful", skill)
-        self.assertIn("Do not insert Clerk between specialists", skill)
+        self.assertIn("Never read Implementer/Fixer output when another specialist is the next consumer", skill)
+        self.assertIn("Trust the specialist chain", skill)
+        self.assertIn("Routine execution is silent", skill)
         self.assertIn("always project-read-only", clerk)
         self.assertNotIn("Evidence Clerk Checks", (ROOT / "templates" / "task-contract-spec.example.json").read_text(encoding="utf-8"))
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## v15.4.2 — Premium trust/context discipline
+
+- Make worker trust explicit: fresh Reviewer is routine technical verification; parent technical self-verification is reserved for frozen phase approval or explicit worker escalation.
+- Define the premium evidence ladder: mechanics → bounded surface → Clerk → targeted evidence → full report.
+- Forbid premium consumption of Implementer/Fixer output when another specialist is the next consumer, redundant technical re-verification, authority restatement in contracts, and routine progress narration.
+- Treat DSD-framework investigation as delegated cheap-worker work whenever possible.
+- Keep parent-facing `dsd_attempt` stdout status-only by default; durable detail remains on disk.
+- No new validators, state fields, documents, or orchestration mechanics.
+
 ## v15.4.1 — Attempt lifecycle and run-root binding hardening
 
 - Fixed run-relative state/attempt paths to resolve against the DSD run root rather than the caller's process cwd, including resumed/legacy `current_contract.path` bindings.

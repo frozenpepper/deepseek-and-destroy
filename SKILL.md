@@ -1,6 +1,6 @@
 ---
 name: deepseek-and-destroy
-description: "Execute complex implementation plans with a premium orchestrator for judgment and cheap specialist workers for repository-scale work. Mechanical helpers protect objective integrity; LLMs interpret engineering meaning."
+description: "Premium orchestrator for judgment; cheap specialists for repository-scale work; deterministic helpers only for objective integrity."
 license: MIT
 compatibility: codex, claude-code, opencode, kilo, and comparable coding harnesses
 metadata:
@@ -11,90 +11,72 @@ metadata:
 
 # DeepSeek and Destroy
 
-> Premium context decides. Cheap workers do technical volume. Python proves only objective facts.
+> Spend premium context only where premium judgment is required.
 
-Continue the authoritative plan until **COMPLETED**, **HUMAN-BLOCKED**, **PAUSED-BY-USER**, or **ABANDONED**. Tasks, reviews, retries, phases, compaction, and fresh sessions are not terminal.
+Continue the authoritative plan until **COMPLETED**, **HUMAN-BLOCKED**, **PAUSED-BY-USER**, or **ABANDONED**. Tasks/reviews/retries/phases/compaction are not terminal.
 
-## Boundary
+## Trust and ownership
 
-- **Parent:** user/project/plan authority, decomposition, role choice, consequential decisions, task acceptance, phase approval.
-- **Technical workers:** repository-scale survey/discovery, implementation, repair, adversarial review, verification, recovery, phase audit.
-- **Python:** immutable bindings/hashes, lifecycle, report-byte existence, exact source movement/write boundaries, ignored-tree inventory, barriers/resume continuity. Never infer PASS/FAIL, AC completeness, proof quality, defects, arithmetic, or engineering meaning from prose.
-- **Evidence Clerk:** optional cheap semantic adapter when the parent would otherwise digest a large/unclear report. Interpret existing evidence only; never invent proof, perform missing verification, edit project state, waive integrity failures, accept work, or recurse.
+- **Parent:** authority, decomposition, role choice, consequential decisions, task acceptance, phase approval.
+- **Workers:** repository-scale discovery, implementation, repair, adversarial review, verification, recovery, phase audit.
+- **Python:** objective facts only—immutable bindings/hashes, lifecycle, source movement/write boundaries, protected inventories, barriers/resume continuity. Never infer engineering meaning from prose.
+- **Clerk:** optional cheap semantic compressor. Interpret existing evidence only; never invent proof, verify missing predicates, edit project state, waive integrity failures, accept work, or recurse.
 
-## Context economy
+**Trust the specialist chain.** For mutations, the fresh independent Reviewer is the routine technical verification. The parent does not repeat technical work to gain confidence. Parent self-verification is reserved for the frozen **phase gate** or an explicit worker escalation requiring parent authority/judgment.
 
-This file is normal parent context. Load only when needed:
-- `WORKSPACE.md` — state/evidence/recovery/concurrency/barriers;
-- exactly one parent harness adapter;
-- `OPENCODE.md` — worker transport diagnosis/recovery;
-- `COMPACTION.md` — checkpoint/resume;
-- `PROMPTS.md` — task/handoff authoring or debugging.
+## Premium discipline
 
-Each worker gets only immutable run facts + `worker/COMMON.md` + **one** role skill + task contract. Add `PROOF-PATTERNS.md` only when the task explicitly names a recipe. Never load unrelated roles/manuals.
+At a parent decision boundary use the smallest sufficient evidence, in order:
 
-## Run and task
+**mechanics → bounded `--surface` → Clerk → targeted evidence → full report**.
 
-Resolve the exact run/worktree/plan/phase/project instructions; never guess among active runs. Read authority needed for decisions, but delegate repository-scale measurement. Bind immutable worker rules and one exact `next_action`; durable state/evidence outrank chat/handover claims.
+Stop as soon as the decision is supported.
 
-One task = one independently reviewable semantic objective. If scoping it requires broad exploration, delegate Surveyor/Discovery first. Author a compact JSON task spec and render/bind its immutable contract. Parent chooses semantics and exact project write scope; helpers derive attempt/report/log/state paths. Repeated no-progress writer attempts are a reasoning signal to re-scope—not a Python retry counter.
+- Never read Implementer/Fixer output when another specialist is the next consumer; pass its immutable evidence onward.
+- Never rerun tests, grep source, recompute hashes, or independently re-review a clean fresh review except for phase approval or a parent-only escalation.
+- Contracts are **deltas over referenced authority**: point to the governing plan/ADR/source; state only the bounded objective, write scope, acceptance delta, and needed verification. Do not restate readable authority.
+- If DSD mechanics fail, delegate bounded framework investigation to a cheap worker when possible. Premium source archaeology is a last resort only to restore delegation.
+- **Routine execution is silent.** No user narration for launches, waits, gates, reviews, fixes, or task acceptance. Speak only for a major decision/escalation or the concise reviewed result at phase end, plus direct user requests.
 
-## Normal loop
+## Context locality
 
-External OpenCode path:
+Normal parent context is this file plus exactly one harness adapter. Load only on demand:
+`WORKSPACE.md` for abnormal state/evidence/recovery/barriers; `OPENCODE.md` for transport trouble; `COMPACTION.md` for checkpoint/resume; `PROMPTS.md` for task/handoff authoring/debugging.
+
+Each worker gets immutable run facts + `worker/COMMON.md` + **one** role skill + task contract. Add `PROOF-PATTERNS.md` only when explicitly requested. Never load unrelated roles/manuals.
+
+## Normal execution
+
+Resolve the exact run/worktree/plan/phase; never guess among active runs. Read only authority needed for parent decisions and delegate repository-scale measurement.
+
+One task = one independently reviewable semantic objective. Use Surveyor/Discovery if broad exploration is needed first. Author compact JSON; helpers derive lifecycle paths/state.
 
 ```text
 dsd_attempt.py launch --run-root … --phase-id … --task-id … --role … [--detach]
 dsd_attempt.py wait   --run-root … --phase-id … --task-id …    # detached only
-dsd_attempt.py gate   --run-root … --phase-id … --task-id …
+dsd_attempt.py gate   --run-root … --phase-id … --task-id … [--surface]
 ```
 
-`launch` creates one self-contained attempt, scope baseline, path-only handoff and immutable reservation, then binds the live attempt **before waiting**. Before a role change it verifies the prior attempt is terminal and moves it to bounded `last_attempt`. A terminal-less prior attempt blocks launch unless exceptional Recovery explicitly uses `--supersede-incomplete` after establishing it cannot still write. `gate` proves objective integrity. Add `--surface` only when the parent is about to consume that worker result; intermediate specialist gates return no worker prose. Native adapters use the same reserve/finalize boundary.
+Use `--surface` only when the parent is about to interpret that result. Intermediate specialist gates return mechanics only. Wait quiescently; no terminal event means wait again with no model polling/narration. Role changes use fresh contexts; same-role continuation is transport/recovery only. Load `WORKSPACE.md` for abnormal lifecycle handling.
 
-Wait quiescently. No terminal event means wait again; do not spend model turns polling logs/CPU/repository. A role change starts a **fresh** context; same-role continuation is transport/recovery only.
-
-Roles: **Phase Surveyor** (current state), **Discovery** (construction brief), **Implementer** (bounded change), **Fixer** (bounded repair), **Reviewer** (fresh adversarial read-only review), **Verification** (one predicate; writes only when exact generated/project paths are authorized), **Recovery** (suspect-change disposition), **Phase Auditor** (frozen-phase audit), **Evidence Clerk** (read-only semantic compression).
-
-Normal mutation flow:
+Normal mutation path:
 
 ```text
 Implementer → fresh Reviewer
                    │
               FAIL └→ fresh Fixer → fresh Reviewer …
                    ↓
-        parent reads bounded surface
+          parent decision boundary
                    ↓ only if useful
-             Evidence Clerk
-                   ↓
-            parent accepts/routes
+                  Clerk
 ```
 
-Do not insert Clerk between specialists when the parent is not consuming the result. Missing technical proof goes to targeted Verification/Review—not Clerk and never a report-format rerun.
+Missing technical proof goes to targeted Verification/Review, never Clerk or a report-format rerun.
 
-## Integrity vs meaning
+## Integrity, phase, human boundary
 
-Deterministic hard failures are only objective facts:
-- immutable contract/rules/evidence or attempt identity broke;
-- lifecycle is not trustworthy;
-- a read-only role moved project state;
-- a writer moved unauthorized paths;
-- required ignored/load-bearing scope was not compared;
-- post-start/reportless changes are suspect until Recovery resolves them;
-- mutating work lacks fresh independent Reviewer provenance;
-- phase evidence no longer describes the frozen source state.
+A clean mechanical gate means **safe to interpret**, never semantic PASS. Hard failures are objective integrity failures only; worker prose is natural engineering evidence, not a machine protocol. The parent makes semantic decisions and `accept-task` records their evidence provenance.
 
-A clean gate means only **safe to interpret**. It is never semantic PASS.
+Phase close: finish writers → freeze → required post-barrier verification → fresh Phase Auditor → **parent phase judgment**. This is the normal place for parent targeted technical verification. Any mutation invalidates stale phase evidence.
 
-Worker reports are natural engineering evidence, not a machine protocol: no Verdict marker, finality token, Proof Matrix, AC-string repetition, defect heading, or arithmetic syntax is mechanically required.
-
-At a parent decision boundary, gate with `--surface` and use that bounded report prefix if sufficient. Otherwise run one read-only Clerk over the exact contract/report/gate. Clerk may reconcile/compress what existing evidence establishes; missing proof remains missing. The parent makes the semantic decision. `dsd_state.py accept-task` binds the exact clean source gate and semantic report actually consumed (Reviewer directly or Clerk), validating provenance/hashes only.
-
-## Exceptional / phase / human boundary
-
-Load `WORKSPACE.md` for suspect changes, reconstruction, concurrency, barriers, or acceptance provenance; transport/compaction docs only for those events. Worker/provider trouble never turns the premium parent into the implementation worker.
-
-Phase close: finish writers → freeze barrier/snapshot → required read-only post-barrier verification → fresh Phase Auditor → parent judgment. Any mutation invalidates stale phase evidence.
-
-Ask the human only for genuinely uninferable product/architecture authority, access/authorization, destructive/paid/live permission, persistent worker availability, unsafe concurrency, or irreconcilable authority conflict. Give the finding and recommendation, not a menu.
-
-Stay quiet between gates. Surface material findings, decisions, blockers, phase results, direct requests, and completion—not routine launch/wait bookkeeping.
+Ask the human only for genuinely uninferable authority, access/authorization, destructive/paid/live permission, unsafe concurrency, persistent worker unavailability, or irreconcilable authority conflict. Give the finding and recommendation, not a menu.
