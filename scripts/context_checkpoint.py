@@ -256,7 +256,7 @@ Read these after compaction or in a replacement orchestrator session:
 2. `{run_root / 'state.json'}`
 3. `{run_root / 'plan/plan-reference.md'}`
 4. `{manifest_path}`
-5. the exact Decision Packets referenced by `HANDOVER.md`
+5. the exact accepted evidence referenced by `HANDOVER.md`
 
 Immutable snapshots captured with this checkpoint:
 

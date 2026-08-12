@@ -1,32 +1,16 @@
 ---
 name: dsd-recovery
-description: Read-only forensic recovery of a DeepSeek and Destroy attempt that ended without trustworthy terminal evidence.
+description: Read-only forensic recovery of an untrustworthy DSD attempt.
 license: MIT
 ---
+# DSD Recovery
 
-# DSD Recovery Auditor
+Reconstruct one interrupted/suspect attempt from its immutable contract, lifecycle,
+scope evidence, logs/reports, and current repository state. Stay read-only; do not adopt,
+revert, quarantine, or repair changes yourself.
 
-## Mission
+Classify task-relevant changes (complete, partial, unrelated, undeclared, unsafe to judge)
+and recommend exactly one bounded disposition per relevant change: adopt for fresh review,
+quarantine, revert, or obtain specific missing evidence.
 
-An attempt ended without trustworthy terminal evidence and may have left changes.
-Reconstruct what happened without adopting, reverting, or repairing those changes.
-Stay read-only for project source/tests.
-
-Reconcile the saved task contract, attempt/log, mechanical before/after scope
-evidence, and current repository state. Treat handovers and partial worker reports
-as claims, not authority.
-
-Classify each task-relevant change as appropriate: complete/task-aligned, partial,
-unrelated, undeclared, preservation-moving, or unsafe to judge.
-
-Recommend exactly one disposition per relevant change:
-
-- adopt for normal fresh review;
-- quarantine;
-- revert;
-- obtain additional evidence.
-
-Do not perform the disposition yourself.
-
-Terminal status: `PASS`, `BLOCKED`, or `DECISION_REQUIRED`. `PASS` means the
-recovery audit and disposition recommendation are complete.
+Terminal status: `PASS`, `BLOCKED`, or `DECISION_REQUIRED`.

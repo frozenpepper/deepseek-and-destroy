@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from _task_contract import extra_scope_inventory
+
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -111,17 +113,18 @@ def git_worktree_paths(root: Path, exclude_prefixes: list[str]) -> set[Path]:
     return result
 
 
-def capture(root: Path, paths: set[Path], *, inventory_mode: str = "paths", exclude_prefixes: list[str] | None = None) -> dict:
+def capture(root: Path, paths: set[Path], *, inventory_mode: str = "paths", exclude_prefixes: list[str] | None = None, extra_inventory_roots: list[str] | None = None) -> dict:
     entries: dict[str, dict] = {}
     for path in sorted(paths):
         rel = path.relative_to(root).as_posix()
         entries[rel] = entry_for(path)
     return {
-        "format": "deepseek-and-destroy-scope-snapshot-v3",
+        "format": "deepseek-and-destroy-scope-snapshot-v4",
         "project_root": str(root),
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "inventory_mode": inventory_mode,
         "exclude_prefixes": exclude_prefixes or [],
+        "extra_inventory_roots": extra_inventory_roots or [],
         "entries": entries,
     }
 
@@ -130,12 +133,16 @@ def compare(root: Path, baseline: dict) -> dict:
     old_entries: dict[str, dict] = baseline.get("entries", {})
     mode = str(baseline.get("inventory_mode", "paths"))
     exclusions = [str(x) for x in baseline.get("exclude_prefixes", []) if isinstance(x, str)]
+    extra_roots = [str(x) for x in baseline.get("extra_inventory_roots", []) if isinstance(x, str)]
     rels = set(old_entries)
     if mode == "git-worktree":
         current_inventory = git_worktree_paths(root, exclusions)
         rels.update(path.relative_to(root).as_posix() for path in current_inventory)
+    if extra_roots:
+        extra_paths = expand_paths(root, extra_roots)
+        rels.update(path.relative_to(root).as_posix() for path in extra_paths)
     current_paths = {lexical_path(root, rel) for rel in rels}
-    current = capture(root, current_paths, inventory_mode=mode, exclude_prefixes=exclusions)
+    current = capture(root, current_paths, inventory_mode=mode, exclude_prefixes=exclusions, extra_inventory_roots=extra_roots)
     new_entries = current["entries"]
     changed: list[dict] = []
     unchanged: list[str] = []
@@ -148,12 +155,13 @@ def compare(root: Path, baseline: dict) -> dict:
         else:
             changed.append({"path": rel, "before": before, "after": after})
     return {
-        "format": "deepseek-and-destroy-scope-comparison-v3",
+        "format": "deepseek-and-destroy-scope-comparison-v4",
         "project_root": str(root),
         "compared_at": datetime.now(timezone.utc).isoformat(),
         "baseline_captured_at": baseline.get("captured_at"),
         "inventory_mode": mode,
         "exclude_prefixes": exclusions,
+        "extra_inventory_roots": extra_roots,
         "changed": changed,
         "unchanged": unchanged,
     }
@@ -179,6 +187,8 @@ def parser() -> argparse.ArgumentParser:
     cap.add_argument("--include-git-changes", action="store_true")
     cap.add_argument("--git-worktree", action="store_true", help="snapshot all Git tracked + untracked nonignored files; ideal for read-only worker independence")
     cap.add_argument("--exclude-prefix", action="append", default=[], help="project-relative prefix excluded from --git-worktree inventory; repeatable")
+    cap.add_argument("--extra-inventory", action="append", default=[], help="project-relative file/directory root to inventory even when Git-ignored; repeatable and re-enumerated on compare")
+    cap.add_argument("--task-contract", type=Path, help="optional immutable task contract; its Extra scope inventory roots are included automatically")
     cap.add_argument("paths", nargs="*", help="Files/directories relative to root for bounded scope snapshots")
 
     cmp = sub.add_parser("compare", help="Compare current content to a snapshot")
@@ -200,17 +210,38 @@ def main() -> int:
         if args.command == "capture":
             if args.git_worktree and args.paths:
                 raise ValueError("use either --git-worktree or explicit paths, not both")
-            if not args.git_worktree and not args.paths:
-                raise ValueError("capture requires --git-worktree or at least one explicit path")
+            if not args.git_worktree and not args.paths and not args.extra_inventory and not args.task_contract:
+                raise ValueError("capture requires --git-worktree, explicit paths, --extra-inventory, or --task-contract")
+            requested_extra = list(args.extra_inventory)
+            if args.task_contract:
+                contract_path = args.task_contract.resolve()
+                if not contract_path.is_file():
+                    raise ValueError(f"task contract missing: {contract_path}")
+                requested_extra.extend(extra_scope_inventory(contract_path.read_text(encoding="utf-8", errors="replace")))
+            extra_roots: list[str] = []
+            for raw in requested_extra:
+                candidate = lexical_path(root, raw)
+                try:
+                    rel = candidate.relative_to(root).as_posix()
+                except ValueError as exc:
+                    raise ValueError(f"extra inventory root is outside project root: {candidate}") from exc
+                if rel == "DeepSeekAndDestroy" or rel.startswith("DeepSeekAndDestroy/"):
+                    raise ValueError("--extra-inventory cannot target DeepSeekAndDestroy/** because run evidence is intentionally self-excluded")
+                extra_roots.append(rel)
+            extra_roots = list(dict.fromkeys(extra_roots))
+            if not args.git_worktree and not args.paths and not extra_roots:
+                raise ValueError("capture resolved no inventory paths; task contract Extra scope inventory is empty")
             if args.git_worktree:
                 paths = git_worktree_paths(root, args.exclude_prefix)
                 mode = "git-worktree"
             else:
-                paths = expand_paths(root, args.paths)
+                paths = expand_paths(root, args.paths) if args.paths else set()
                 if args.include_git_changes:
                     paths.update(git_changed_paths(root))
                 mode = "paths"
-            data = capture(root, paths, inventory_mode=mode, exclude_prefixes=args.exclude_prefix)
+            if extra_roots:
+                paths.update(expand_paths(root, extra_roots))
+            data = capture(root, paths, inventory_mode=mode, exclude_prefixes=args.exclude_prefix, extra_inventory_roots=extra_roots)
             output = args.output.resolve()
             write_new_json(output, data)
             print(f"Captured {len(data['entries'])} paths ({mode}) to {output}")

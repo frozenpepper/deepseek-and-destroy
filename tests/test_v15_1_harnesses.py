@@ -41,7 +41,7 @@ class V151HarnessAuditTest(unittest.TestCase):
             self.assertTrue(one["changed"]); self.assertFalse(two["changed"])
             self.assertNotIn(".kilo/plugins/", str(plugin))
             tools = project / "DeepSeekAndDestroy" / "tools"
-            for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py"):
+            for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py", "_task_contract.py"):
                 self.assertTrue((tools / name).is_file(), name)
             check = self.run_cmd([PYTHON, str(tools / "check_state.py"), "--help"])
             self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
@@ -127,19 +127,10 @@ class V151HarnessAuditTest(unittest.TestCase):
                 "--event-dir", str(event.resolve()), "--log", str(log.resolve()),
             ])
             self.assertEqual(reserve.returncode, 0, reserve.stdout + reserve.stderr)
-            report.write_text(textwrap.dedent("""
-                ## Decision Packet
-                DSD_REPORT_STATUS: FINAL
-                Verdict: PASS
-                Verification: PASS; total=1; passed=1; failed=0; skipped=0
-                Task-relevant defects: NONE
-                Clerk checks: NONE
-
-                ## Proof Matrix
-                | AC | Mechanism reached | Positive evidence | Negative/discriminating evidence | Dimensions | Counterexample | Result |
-                | --- | --- | --- | --- | --- | --- | --- |
-                | AC-001 | Read tracked source directly | `source.txt` contains `base` | Worktree scope snapshot shows no source mutation | one tracked file | no alternate mechanism claimed | PASS |
-            """))
+            report.write_text(
+                "Reviewed the tracked production input directly. source.txt remained readable and unchanged; "
+                "no task-relevant defect was found.\n"
+            )
             final = self.run_cmd([
                 PYTHON, str(ROOT / "scripts" / "native_worker_attempt.py"), "finalize",
                 "--event-dir", str(event.resolve()), "--status", "completed",
@@ -151,10 +142,12 @@ class V151HarnessAuditTest(unittest.TestCase):
                 PYTHON, str(ROOT / "scripts" / "evidence_gate.py"), "--run-root", str(run.resolve()),
                 "--task", str(task.resolve()), "--report", str(report.resolve()), "--terminal-event", str((event / "terminal.json").resolve()),
                 "--role", "reviewer", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()),
-                "--require-review-pass", "--json",
+                "--json",
             ])
             self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
-            gated = json.loads(gate.stdout); self.assertTrue(gated["ok"]); self.assertTrue(gated["fast_path_eligible"])
+            gated = json.loads(gate.stdout)
+            self.assertTrue(gated["ok"]); self.assertTrue(gated["mechanical_ok"])
+            self.assertNotIn("verdict", gated); self.assertNotIn("fast_path_eligible", gated)
 
     def test_all_core_harness_installers_use_canonical_assets_and_complete_helpers(self):
         with tempfile.TemporaryDirectory() as td:
@@ -167,7 +160,7 @@ class V151HarnessAuditTest(unittest.TestCase):
                 ])
                 self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
                 tools = project / "DeepSeekAndDestroy" / "tools"
-                for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py"):
+                for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py", "_task_contract.py"):
                     self.assertTrue((tools / name).is_file(), f"{harness}: {name}")
             codex = json.loads((root / "codex" / ".codex" / "hooks.json").read_text())
             canonical_codex = json.loads((ROOT / "adapters" / "codex" / "hooks.json").read_text())
@@ -206,7 +199,7 @@ class V151HarnessAuditTest(unittest.TestCase):
         config = (ROOT / "CONFIG.example.md").read_text()
         self.assertIn("kilo", config.lower())
         self.assertNotIn("reviewer resume when trustworthy/moderate", config)
-        self.assertIn("fresh DeepSeek worker", config)
+        self.assertIn("Role changes start fresh sessions", config)
         self.assertFalse((ROOT / "contrib" / "kilo" / "dsd-compaction.ts").exists())
         self.assertFalse((ROOT / "contrib" / "kilo" / "agents").exists())
         self.assertTrue((ROOT / "KILO.md").is_file())

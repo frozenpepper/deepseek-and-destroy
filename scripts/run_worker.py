@@ -72,14 +72,9 @@ def lookup_session_id(env: dict[str, str], title: str) -> tuple[str | None, str 
 def skeleton_text(evidence_dir: Path) -> str:
     # Identity belongs to the launch reservation, not to worker-authored prose.
     return "\n".join([
-        "## Decision Packet",
-        "DSD_REPORT_STATUS: SKELETON",
-        "Verdict: BLOCKED",
-        "Goal/result: worker has not finalized this report",
-        "Verification: UNKNOWN",
-        "Task-relevant defects: UNKNOWN",
-        "Clerk checks: REQUIRED RC-004 REPORT-SKELETON",
-        f"Evidence: {evidence_dir}",
+        "# DSD worker report",
+        "PENDING — launcher skeleton; worker has not written substantive evidence.",
+        f"Attempt artifacts: {evidence_dir}",
         "",
     ])
 

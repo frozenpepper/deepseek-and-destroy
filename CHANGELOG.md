@@ -1,5 +1,75 @@
 # Changelog
 
+## v15.3 — Context-economy consolidation and semantic-boundary completion
+
+- completed the v15 Evidence Clerk architecture: long worker prose is no longer a
+  machine acceptance protocol; deterministic gates prove objective attempt/scope facts
+  only, while semantic adequacy stays with LLMs and the premium parent;
+- removed `check_review_contract.py` and `_report_contract.py`; removed obsolete
+  reviewer/Clerk semantic gate flags rather than silently pretending they still check
+  meaning;
+- renamed the bounded non-authoritative report preview helper to `report_surface.py` to
+  avoid implying decision authority;
+- added `dsd_attempt.py launch|gate`, a thin transaction facade that derives attempt
+  paths/config, scope baseline, prompt, reservation, launch, gate artifacts and routine
+  state bookkeeping without choosing roles, retries, semantics or acceptance;
+- made attempts self-contained under `attempts/<role>-<n>/` and clean up pre-launch
+  helper failures before an immutable reservation exists;
+- made Evidence Clerk always project-read-only; project documentation mutation is a
+  normal bounded writer task, while Verification remains conditionally writable only
+  for explicit generated/project paths;
+- reduced worker context to run rules + COMMON + one role + task; proof recipes are
+  loaded only when explicitly named, and prior evidence is passed by immutable path +
+  SHA-256 rather than copied prose;
+- compressed parent/worker/harness doctrine and moved recovery/barrier/transport/
+  compaction details behind lazy-loaded references;
+- replaced legacy tests that encoded Verdict markers, Proof Matrices, arithmetic parsing
+  and Clerk overlays as correctness with objective-mechanics and natural-report
+  regressions;
+- added an end-to-end natural-prose Reviewer regression proving that a report with no
+  ceremonial verdict/table/finality syntax still passes the mechanical gate cleanly.
+
+## v15.2 — Orchestrator secretarial-work elimination
+
+Field feedback from a Claude Opus orchestration run showed that v15.1 preserved
+strong evidence semantics but leaked mechanical serialization back into premium
+context. v15.2 fixes the abstraction boundary rather than adding another worker
+ritual:
+
+- `render_task_contract.py` now accepts a JSON spec file or stdin while retaining
+  the legacy slot CLI; it can use `DSD_RUN_ROOT` and run-relative output paths, and
+  optional role preflight rejects Evidence-Clerk recursion.
+- added `dsd_state.py` for validated atomic `bind-contract`, `bind-attempt`, `accept`,
+  and `set-next` transitions instead of repeated state heredocs.
+- centralized report wire parsing in `_report_contract.py` and task-contract field
+  parsing in `_task_contract.py`; gates accept harmless bullet/bold decoration and
+  descriptive labels after Proof Matrix AC ids without duplicating private grammar.
+- Reviewer task AC discovery is now scoped strictly to `## Acceptance criteria`, so
+  AC ids mentioned in objectives/inputs cannot contaminate the review contract.
+- published the canonical report wire grammar in worker `COMMON.md`, including the
+  stable Clerk-check-id requirement; validator archaeology is no longer a startup
+  task.
+- Evidence Clerk attempts no longer self-route because their own contract happens to
+  contain an `Evidence Clerk Checks` section; the renderer rejects that combination
+  when the intended role is known, while the gate treats it as nonrecursive.
+- Verification is conditionally writable when and only when its immutable contract
+  has non-empty `Allowed source changes`, covering generated accepted artifacts
+  without adding a redundant specialist role.
+- `scope_snapshot.py --extra-inventory` now captures and re-enumerates Git-ignored
+  load-bearing roots; `--task-contract` imports the contract declaration automatically
+  and `evidence_gate.py` rejects baselines that omit required roots.
+- documented the report-only same-role correction pattern for the rare missing
+  semantic field that a Clerk cannot invent; Clerk-normalizable formatting still
+  does not consume a new semantic worker run.
+- `evidence_gate.py` accepts run-relative artifact paths and normalizes them before
+  immutable binding checks; Claude multi-run resume guidance explicitly uses
+  `DSD_RUN_ROOT` rather than guessing.
+- added focused v15.2 regressions for JSON contracts, parser tolerance/AC isolation,
+  ignored-tree additions, state transactions, and conditional Verification writes.
+- tightened parent doctrine around compact recommended adjudications instead of
+  presenting routine decision menus, while preserving human escalation for true
+  authorization/intent boundaries.
+
 ## v15.1 — Kilo restoration and orphan-surface audit
 
 - Restored Kilo Code as a first-class parent harness with top-level `KILO.md`,

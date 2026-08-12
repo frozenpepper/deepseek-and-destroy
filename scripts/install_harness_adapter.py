@@ -90,7 +90,7 @@ def install_hook_fragment(path: Path, fragment_path: Path) -> tuple[bool, Path |
 def install_helper(skill_root: Path, project_root: Path) -> Path:
     tools = project_root / "DeepSeekAndDestroy" / "tools"
     tools.mkdir(parents=True, exist_ok=True)
-    for name in ("context_checkpoint.py", "check_state.py", "_rules_snapshot.py", "_roles.py"):
+    for name in ("context_checkpoint.py", "check_state.py", "_rules_snapshot.py", "_roles.py", "_task_contract.py"):
         source = skill_root / "scripts" / name
         destination = tools / name
         shutil.copy2(source, destination)

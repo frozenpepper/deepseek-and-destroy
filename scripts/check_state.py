@@ -13,8 +13,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from _roles import PHASE_BARRIER_WRITER_ROLES, ZERO_CHANGE_GUARD_ROLES
+from _roles import ZERO_CHANGE_GUARD_ROLES, role_is_project_writer
 from _rules_snapshot import sha256_file, verify_snapshot
+from _task_contract import allowed_source_changes
 
 TERMINAL = {"completed", "human-blocked", "paused-by-user", "abandoned"}
 
@@ -40,6 +41,21 @@ def pid_alive(pid: Any) -> bool:
 
 def attempt_pid(attempt: dict[str, Any]) -> Any:
     return attempt.get("worker_pid") or attempt.get("pid") or attempt.get("monitor_pid")
+
+
+def task_declares_project_writes(task: dict[str, Any], base: Path) -> bool:
+    """Return whether the current immutable contract grants project write paths."""
+    contract = task.get("current_contract") or {}
+    value = contract.get("path") or task.get("contract_path") or task.get("task_path")
+    if not isinstance(value, str) or not value.strip():
+        return False
+    path = Path(value)
+    if not path.is_absolute():
+        path = base / path
+    try:
+        return bool(allowed_source_changes(path.read_text(encoding="utf-8", errors="replace")))
+    except (OSError, ValueError):
+        return False
 
 
 def validate_task(task_id: str, task: dict[str, Any], base: Path, worker_rules: dict[str, Any]) -> list[str]:
@@ -320,7 +336,21 @@ def main() -> int:
             task_status = str(task.get("status", "")).lower()
             active_role = str(attempt.get("role") or task.get("next_role") or "").lower()
             if phase_status in {"auditing", "gate-due", "gating"} and task_status in {"launching", "in-progress"}:
-                if active_role in PHASE_BARRIER_WRITER_ROLES or bool(attempt.get("writes_project")):
+                writes_project = bool(attempt.get("writes_project")) or role_is_project_writer(active_role, [])
+                if not writes_project and active_role:
+                    contract = task.get("current_contract") or {}
+                    contract_path = Path(str(contract.get("path", ""))) if isinstance(contract, dict) else None
+                    if contract_path and not contract_path.is_absolute():
+                        contract_path = base / contract_path
+                    if contract_path and contract_path.is_file():
+                        try:
+                            writes_project = role_is_project_writer(
+                                active_role,
+                                allowed_source_changes(contract_path.read_text(encoding="utf-8", errors="replace")),
+                            )
+                        except (OSError, ValueError):
+                            writes_project = task_declares_project_writes(task, base)
+                if writes_project:
                     errors.append(f"{full_id}: phase barrier cannot be CLOSED while a project-writing attempt is active")
             if task_status == "in-progress" and str(attempt.get("liveness", "")).lower() == "confirmed":
                 pid = attempt_pid(attempt)

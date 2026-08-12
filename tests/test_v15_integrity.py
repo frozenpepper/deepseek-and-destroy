@@ -110,7 +110,7 @@ class V15IntegrityTest(unittest.TestCase):
         try:
             import run_worker, render_worker_prompt, evidence_gate
             self.assertEqual(set(run_worker.ROLES), set(render_worker_prompt.ROLE_SKILLS))
-            self.assertEqual(set(run_worker.ROLES), set(evidence_gate.ROLE_TERMINALS))
+            self.assertEqual(set(run_worker.ROLES), set(evidence_gate.ROLE_NAMES))
         finally:
             if _sys.path and _sys.path[0] == scripts:
                 _sys.path.pop(0)
@@ -210,7 +210,7 @@ class V15IntegrityTest(unittest.TestCase):
             second = self.run_cmd(cmd, env=env); self.assertEqual(second.returncode, 2, second.stdout + second.stderr)
             self.assertTrue("already exists" in second.stderr or "reservation" in second.stderr)
 
-    def test_natural_language_verification_arithmetic_routes_to_clerk(self):
+    def test_mechanical_gate_does_not_interpret_verification_arithmetic(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); project = self.init_git_project(root)
             (project / "base.txt").write_text("base\n"); self.run_cmd(["git", "add", "base.txt"], cwd=project); self.run_cmd(["git", "commit", "-m", "base"], cwd=project)
@@ -225,8 +225,11 @@ class V15IntegrityTest(unittest.TestCase):
                 "--task", str(task.resolve()), "--report", str(report.resolve()), "--role", "implementer",
                 "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()), "--json",
             ])
-            self.assertEqual(cp.returncode, 4, cp.stdout + cp.stderr)
-            self.assertTrue(any("VERIFICATION-ARITHMETIC" in x for x in json.loads(cp.stdout)["clerk_reasons"]))
+            self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
+            payload = json.loads(cp.stdout)
+            self.assertTrue(payload["mechanical_ok"])
+            self.assertNotIn("clerk_reasons", payload)
+            self.assertNotIn("verdict", payload)
 
     def test_scope_snapshot_records_symlink_identity_without_hashing_external_target(self):
         if os.name == "nt":
