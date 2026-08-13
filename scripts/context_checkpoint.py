@@ -260,15 +260,9 @@ def prepare(
 - Context percentage when known: `{context_percent if context_percent is not None else 'unknown'}`
 - Created: `{manifest['created_at']}`
 
-## Authoritative continuity files
+## Continuity authority
 
-Read these after compaction or in a replacement orchestrator session:
-
-1. `{run_root / 'HANDOVER.md'}`
-2. `{run_root / 'state.json'}`
-3. `{run_root / 'plan/plan-reference.md'}`
-4. `{manifest_path}`
-5. the exact accepted semantic-evidence / Clerk reports referenced by `HANDOVER.md`
+Read live `{run_root / 'state.json'}` first. It is authoritative for current execution. `{manifest_path}` verifies checkpoint identity; HANDOVER/plan/evidence are cold and should be opened only when the live `next_action` actually needs their context.
 
 Immutable snapshots captured with this checkpoint:
 
@@ -285,8 +279,8 @@ Immutable snapshots captured with this checkpoint:
 
 ## Resume contract
 
-The compacted conversation is not authoritative. Reload the skill, read the live
-handover and state, then run the mechanical continuity verifier before revalidating
+The compacted conversation is not authoritative. Reload the skill, read live
+`state.json` first, then run the mechanical continuity verifier before revalidating
 any live worker:
 
 ```bash
@@ -346,16 +340,14 @@ def rehydrate_text(project_root: Path, run_root_arg: str | None, session_id: str
         set_checkpoint_status(run_root, "rehydration-required", rehydration_requested_at=utc_now())
     return f"""DeepSeek and Destroy continuity is active.
 
-Before any project work:
-1. Reload the DeepSeek and Destroy skill from its installed skill directory.
-2. Read `{run_root / 'HANDOVER.md'}`.
-3. Read `{run_root / 'state.json'}`.
-4. Read `{checkpoint_md}` and `{manifest_path}`.
-5. Run `python3 "{project_root / 'DeepSeekAndDestroy/tools/context_checkpoint.py'}" --run-root "{run_root}" verify-resume --sequence {sequence}`; it mechanically checks governing plan/config/authority continuity.
-6. Revalidate any worker recorded as live; do not trust pre-compaction PID/liveness blindly.
-7. Execute the live `state.json` `next_action` immediately.
+Before any project reasoning:
+1. Reload the DeepSeek and Destroy skill.
+2. Read live `{run_root / 'state.json'}` first.
+3. Run `python3 "{project_root / 'DeepSeekAndDestroy/tools/context_checkpoint.py'}" --run-root "{run_root}" verify-resume --sequence {sequence}`.
+4. Revalidate any worker recorded as live when needed.
+5. Execute a mechanical live `next_action` immediately. If it requires parent judgment, open only the exact decision/evidence/authority it names; read HANDOVER only for genuinely missing non-state continuity.
 
-The native compacted summary is advisory only. The external checkpoint and live run files are authoritative.
+Do not reconstruct the run from git history, session notes, old reports/contracts, or broad project architecture. The native compacted summary is advisory; live state plus immutable evidence are authority.
 """
 
 

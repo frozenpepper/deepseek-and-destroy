@@ -34,35 +34,15 @@ New attempt evidence is self-contained. Run files are orchestration evidence, no
 
 ## Authority / immutability
 
-Current user instructions and governing project/plan authority define semantics. `state.json` records execution reality; immutable task/rules/attempt/gate artifacts prove what actually ran. HANDOVER/chat/progress are continuity aids only.
+Current user instructions and governing project/plan authority define semantics. `state.json` is authoritative for **current execution reality**; immutable task/rules/attempt/gate artifacts prove what actually ran. HANDOVER/chat/progress are optional continuity aids only. If HANDOVER disagrees with live state about the active task/attempt/`next_action`, live state wins.
 
 Once consumed by a launch, worker-rules revisions, task contracts, prompt/reservation/baseline bindings, terminal events, gates, and accepted semantic evidence are immutable. New meaning gets a new numbered artifact.
 
 ## Minimal state
 
-State records facts, not routing heuristics. Per task retain contract, current attempt/gate, bounded `last_attempt` pointer, status, and accepted evidence bindings:
+State records facts, not routing heuristics. Per task retain the current contract, current attempt/gate, bounded `last_attempt`, status, and accepted evidence bindings. `semantic_report` points to the Reviewer report consumed directly or the optional Clerk report. Do not store regex verdicts, `next_role`, transport counters, dependency prose, or no-progress heuristics.
 
-```json
-{
-  "status": "accepted",
-  "current_contract": {"revision": 3, "path": "...", "sha256": "..."},
-  "last_attempt": {"role": "implementer", "attempt": 1, "event_dir": "...", "status": "gated", "integrity_gate": {"path": "...", "sha256": "..."}},
-  "current_attempt": {
-    "role": "reviewer", "attempt": 1, "event_dir": "...",
-    "launch_reservation": "...", "launch_reservation_sha256": "...",
-    "terminal_event": "...", "writes_project": false
-  },
-  "accepted": {
-    "source_gate": {"path": "...", "sha256": "..."},
-    "semantic_report": {"path": "...", "sha256": "..."},
-    "semantic_gate": {"path": "...", "sha256": "..."}
-  }
-}
-```
-
-`semantic_report` is the Reviewer report when the parent consumed it directly, or a Clerk report when compression was useful. Do not store regex verdicts, `next_role`, transport counters, dependency prose, or no-progress heuristics.
-
-At run level keep execution status, one exact `next_action`, worker-rules/runtime binding, optional availability/wait state, and checkpoint state. Use `dsd_state.py`; do not hand-patch routine transitions. `check_state.py` validates objective consistency only.
+At run level keep execution status, one exact `next_action`, worker-rules/runtime binding, optional wait/availability state, and checkpoint state. Use `dsd_state.py`; do not hand-patch routine transitions. `check_state.py` validates objective consistency only.
 
 ## Attempt lifecycle
 
@@ -127,10 +107,12 @@ Waiting is quiescent. Do not use model turns to poll logs/CPU/repository. Provid
 
 ## Resume
 
-A fresh parent starts from `state.json`, exact `next_action`, current contract/attempt/gate, relevant plan/authority reference, and only accepted semantic evidence needed for the next decision. Do not reread all historical reports/project architecture merely because the session changed.
+A fresh parent first identifies the exact run using explicit binding or minimal candidate `state.json` metadata, then reads the chosen live `state.json`. Do not inspect git history, session notes, historical reports, old contracts, or project architecture merely because the parent session changed.
 
-When several runs are active, require exact `DSD_RUN_ROOT`/user authority; never guess. Checkpoint details are in `COMPACTION.md`.
+Execute a mechanically self-contained `next_action` immediately. If the next action requires judgment, read only the decision/evidence/authority pointers needed for that decision. HANDOVER is cold continuity context, not a prerequisite for routine resume.
+
+When several active runs remain genuinely ambiguous, require exact `DSD_RUN_ROOT`/user authority; never infer ownership from broad archaeology. When ownership is explicitly transferred, do not leave the superseded run presented as the current run. Checkpoint details are in `COMPACTION.md`.
 
 ## Major log
 
-`major-findings-and-fixes.md` records only serious defects/root causes, consequential decisions, major fixes, accepted residuals, and genuine availability/human blocks with evidence links. It is not a transcript and does not duplicate routine reports.
+`major-findings-and-fixes.md` records only serious defects/root causes, consequential decisions, major fixes, accepted residuals, and genuine availability/human blocks with evidence links. It is not a transcript. When the parent makes a consequential decision, record a **brief durable decision** there before delegating the follow-on task; later `next_action`/contracts should point to that decision instead of reconstructing it.

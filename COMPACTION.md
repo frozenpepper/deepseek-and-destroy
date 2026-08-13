@@ -4,9 +4,9 @@ Cold reference for long parent sessions, native compaction, crashes, and fresh-s
 
 ## Principle
 
-Maintain a **small** `HANDOVER.md` during the run; do not create a giant handover from memory when context is already full. Update it only when continuity materially changes: user/plan authority, consequential decision/correction, important project/harness quirk, active phase/task, worker availability, or an exact `next_action` a fresh parent could misunderstand.
+`state.json` is the execution-resume authority. Keep `HANDOVER.md` only for **non-state continuity** that would otherwise be easy to lose: user/mission constraints, consequential context not already in the major log, or an important project/harness quirk. Do not duplicate the active task, worker, gate, or `next_action` already present in state.
 
-Routine task evidence stays in worker reports (and Clerk reports when used). Mechanical state stays in `state.json`.
+Routine evidence stays in worker/Clerk reports. Consequential parent decisions belong briefly in `major-findings-and-fixes.md`.
 
 ## When to checkpoint
 
@@ -29,10 +29,13 @@ Checkpoint states are mechanical lifecycle markers only: `none`, `prepared`, `co
 
 ## Resume
 
-Before new project work:
+Before new project reasoning:
 1. reload `SKILL.md` + the active parent adapter;
-2. read live `state.json`, concise `HANDOVER.md`, plan reference, and latest checkpoint manifest;
-3. run:
+2. identify the exact run from explicit binding or minimal candidate state metadata;
+3. read the chosen live `state.json` **first**;
+4. if a prepared checkpoint exists, run `verify-resume` below;
+5. revalidate any live worker if needed, then execute a mechanical `next_action` immediately;
+6. only when `next_action` requires parent judgment, read the exact named decision/evidence/authority. Read HANDOVER only if genuinely needed for non-state continuity.
 
 ```bash
 python3 DeepSeekAndDestroy/tools/context_checkpoint.py \
@@ -40,23 +43,11 @@ python3 DeepSeekAndDestroy/tools/context_checkpoint.py \
   --sequence <sequence> --harness <parent-harness>
 ```
 
-4. revalidate any live worker separately (it may legitimately have advanced while the parent compacted);
-5. execute the live `next_action` immediately.
+`verify-resume` checks recorded governing plan/reference, authority index, effective configuration, and plan-source identity without requiring mutable execution state to remain frozen. Do not read git history, session notes, old contracts/reports, or broad project architecture just because the parent session changed.
 
-`verify-resume` checks recorded governing plan/reference, authority index, effective configuration, and plan-source identity. It deliberately does not require mutable execution state to remain frozen.
+## HANDOVER.md is cold continuity only
 
-## HANDOVER.md contains only continuity
-
-Keep:
-- run/plan/worktree identity;
-- user/mission constraints easy to lose;
-- current phase/task and meaningful remediation state;
-- consequential decisions/corrections and major-log references;
-- active worker/evidence pointers when relevant;
-- unresolved disputed/human facts;
-- exact `next_action` and explicit resume prohibitions.
-
-Do **not** copy the plan, full reports, raw logs, large artifacts, or routine state already represented elsewhere.
+Keep only context not already represented durably elsewhere: user/mission constraints easy to lose, consequential context not yet captured in the major log, unusual project/harness quirks, or unresolved human facts. Do **not** copy the plan, active task/worker/`next_action`, full reports, raw logs, large artifacts, or routine state.
 
 ## Failure / ambiguity
 

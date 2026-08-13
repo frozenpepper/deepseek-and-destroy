@@ -13,7 +13,7 @@ Prefer explicit harness configuration/session identity; use `detect_harness.py` 
 
 Universal invariant: waiting is quiescent. External workers wake on exact `terminal.json`; supported native workers finalize the same DSD lifecycle when their native Task returns. Transport completion never implies semantic PASS.
 
-Install only the selected project-local continuity adapter:
+Install only the selected project-local continuity adapter. After upgrading DSD, rerun this idempotent installer; restarting the parent harness refreshes the skill, not existing project-local copies:
 
 ```bash
 python3 <skill>/scripts/install_harness_adapter.py --project-root <project> --harness <codex|claude-code|opencode|kilo>

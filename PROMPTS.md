@@ -32,7 +32,7 @@ Typical spec:
 }
 ```
 
-Keep only task-specific facts. Empty optional fields may be omitted. `write_paths` is explicit because it is a mechanical project-write boundary; an empty/missing list means no project writes. `extra_inventory` names ignored but load-bearing project roots whose movement must be tracked mechanically.
+Keep only task-specific **deltas**. Point `authority` at readable plan/ADR/source or a recorded major decision (for example `D-039`) instead of copying it into `objective`. Empty optional fields may be omitted. `write_paths` is explicit because it is a mechanical project-write boundary; an empty/missing list means no project writes. `extra_inventory` names ignored but load-bearing project roots whose movement must be tracked mechanically.
 
 Acceptance/proof text guides capable workers and reviewers; Python does not parse it to judge engineering success. `AC-*` labels are optional readability aids and are assigned automatically when absent.
 

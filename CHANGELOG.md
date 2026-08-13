@@ -1,5 +1,15 @@
 # Changelog
 
+## v15.4.4 — State-first resume discipline
+
+- Make live `state.json` the explicit authority for current execution on fresh-session resume; stale HANDOVER/chat/session notes cannot override active task/attempt/`next_action`.
+- Add a minimal resume fast path: identify the exact run from explicit binding/minimal state metadata, execute mechanical `next_action` immediately, and read only named decision/evidence/authority when parent judgment is actually required.
+- Demote `HANDOVER.md` to non-state continuity only; stop duplicating active task, worker, gate, and next action there.
+- Require consequential parent decisions to leave a brief record in the existing major log so follow-on contracts can reference the decision instead of reconstructing it.
+- Reinforce task contracts as deltas/pointers over readable authority rather than copied plan text.
+- Clarify that skill restart does not refresh project-local harness-adapter copies; rerun the existing idempotent installer after DSD upgrades.
+- No new runtime helper, validator, state field, document, or orchestration mechanism.
+
 ## v15.4.3 — Stable phase finalization
 
 - Require all selector/pointer/promotion/finalization operations that establish or refer to a final snapshot to be exercised before the freeze is declared final.

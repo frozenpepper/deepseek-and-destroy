@@ -189,4 +189,4 @@ Use DeepSeek and Destroy to execute the authoritative plan at <path>.
 Continue autonomously until complete or genuinely human-blocked.
 ```
 
-For long runs, DSD preserves exact state/evidence and one `next_action`, so context compaction or a fresh parent session resumes execution rather than reconstructing the entire history.
+For long runs, DSD preserves exact state/evidence and one `next_action`. A fresh parent reads live state first and executes a mechanical next action immediately; HANDOVER/session history are cold continuity, not a reason to reconstruct the run.

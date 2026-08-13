@@ -66,7 +66,12 @@ class V154ConsolidationTest(unittest.TestCase):
         self.assertIn("Never read Implementer/Fixer output when another specialist is the next consumer", skill)
         self.assertIn("Trust the specialist chain", skill)
         self.assertIn("Routine execution is silent", skill)
+        self.assertIn("do not reconstruct the run", skill)
+        self.assertIn("state.json", skill)
         self.assertIn("always project-read-only", clerk)
+        compaction = (ROOT / "scripts" / "context_checkpoint.py").read_text(encoding="utf-8")
+        self.assertIn("Read live `{run_root / 'state.json'}` first", compaction)
+        self.assertIn("Do not reconstruct the run from git history", compaction)
         self.assertNotIn("Evidence Clerk Checks", (ROOT / "templates" / "task-contract-spec.example.json").read_text(encoding="utf-8"))
 
     def test_proof_library_is_lazy_and_never_loaded_for_clerk(self):

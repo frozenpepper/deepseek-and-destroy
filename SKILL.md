@@ -15,41 +15,34 @@ metadata:
 
 Continue the authoritative plan until **COMPLETED**, **HUMAN-BLOCKED**, **PAUSED-BY-USER**, or **ABANDONED**. Tasks/reviews/retries/phases/compaction are not terminal.
 
-## Trust and ownership
+## Ownership and trust
 
-- **Parent:** authority, decomposition, role choice, consequential decisions, task acceptance, phase approval.
-- **Workers:** repository-scale discovery, implementation, repair, adversarial review, verification, recovery, phase audit.
+- **Parent:** authority, decomposition, role choice, consequential decisions, acceptance, phase approval.
+- **Workers:** repository-scale discovery, implementation, repair, review, verification, recovery, phase audit.
 - **Python:** objective facts only—immutable bindings/hashes, lifecycle, source movement/write boundaries, protected inventories, barriers/resume continuity. Never infer engineering meaning from prose.
-- **Clerk:** optional cheap semantic compressor. Interpret existing evidence only; never invent proof, verify missing predicates, edit project state, waive integrity failures, accept work, or recurse.
+- **Clerk:** optional cheap semantic compressor; interpret existing evidence only. Never invent/verify missing proof, edit project state, waive integrity, accept work, or recurse.
 
-**Trust the specialist chain.** For mutations, the fresh independent Reviewer is the routine technical verification. The parent does not repeat technical work to gain confidence. Parent self-verification is reserved for the frozen **phase gate** or an explicit worker escalation requiring parent authority/judgment.
+**Trust the specialist chain.** After mutation, the fresh independent Reviewer is routine technical verification. The parent does not repeat that work for reassurance. Parent self-verification belongs at the frozen **phase gate** or an explicit worker escalation requiring parent authority/judgment.
 
 ## Premium discipline
 
-At a parent decision boundary use the smallest sufficient evidence, in order:
-
-**mechanics → bounded `--surface` → Clerk → targeted evidence → full report**.
-
-Stop as soon as the decision is supported.
+Use the smallest sufficient evidence: **mechanics → bounded `--surface` → Clerk → targeted evidence → full report**. Stop when the decision is supported.
 
 - Never read Implementer/Fixer output when another specialist is the next consumer; pass its immutable evidence onward.
-- Never rerun tests, grep source, recompute hashes, or independently re-review a clean fresh review except for phase approval or a parent-only escalation.
-- Contracts are **deltas over referenced authority**: point to the governing plan/ADR/source; state only the bounded objective, write scope, acceptance delta, and needed verification. Do not restate readable authority.
-- If DSD mechanics fail, delegate bounded framework investigation to a cheap worker when possible. Premium source archaeology is a last resort only to restore delegation.
-- **Routine execution is silent.** No user narration for launches, waits, gates, reviews, fixes, or task acceptance. Speak only for a major decision/escalation or the concise reviewed result at phase end, plus direct user requests.
+- Never rerun tests, grep source, recompute hashes, or re-review a clean fresh review except for phase approval or a parent-only escalation.
+- Contracts are **deltas over referenced authority**: objective, exact write scope, acceptance delta, needed verification. Point to readable plan/ADR/source/recorded decision; do not restate it.
+- If DSD mechanics fail, delegate bounded framework investigation to a cheap worker when possible. Premium source archaeology is a last resort to restore delegation.
+- **Routine execution is silent.** No user narration for launches, waits, gates, reviews, fixes, or task acceptance. Speak only for major decision/escalation, concise reviewed phase-end result, or direct user request.
 
-## Context locality
+## Context locality and resume
 
-Normal parent context is this file plus exactly one harness adapter. Load only on demand:
-`WORKSPACE.md` for abnormal state/evidence/recovery/barriers; `OPENCODE.md` for transport trouble; `COMPACTION.md` for checkpoint/resume; `PROMPTS.md` for task/handoff authoring/debugging.
+Normal parent context is this file + one harness adapter. Load only when needed: `WORKSPACE.md` for abnormal lifecycle/recovery/barriers; `OPENCODE.md` for transport trouble; `COMPACTION.md` for checkpoint recovery; `PROMPTS.md` for task/handoff authoring/debugging. Workers get run facts + `worker/COMMON.md` + one role + task; proof recipes only when explicitly requested.
 
-Each worker gets immutable run facts + `worker/COMMON.md` + **one** role skill + task contract. Add `PROOF-PATTERNS.md` only when explicitly requested. Never load unrelated roles/manuals.
+On a fresh parent session, **do not reconstruct the run**. Identify the exact run from explicit binding or minimal state metadata and read live `state.json` first; it outranks HANDOVER/chat/session notes for current execution. Execute a mechanical `next_action` immediately. For a semantic `next_action`, read only its named decision/evidence/authority and expand only if necessary. If active runs remain genuinely ambiguous, require exact run authority—never resolve identity through broad archaeology.
 
 ## Normal execution
 
-Resolve the exact run/worktree/plan/phase; never guess among active runs. Read only authority needed for parent decisions and delegate repository-scale measurement.
-
-One task = one independently reviewable semantic objective. Use Surveyor/Discovery if broad exploration is needed first. Author compact JSON; helpers derive lifecycle paths/state.
+Once the run is known, read only authority needed for the next parent decision and delegate repository-scale measurement. One task = one independently reviewable semantic objective. Use Surveyor/Discovery for broad exploration. Author compact JSON; helpers derive lifecycle paths/state.
 
 ```text
 dsd_attempt.py launch --run-root … --phase-id … --task-id … --role … [--detach]
@@ -57,9 +50,7 @@ dsd_attempt.py wait   --run-root … --phase-id … --task-id …    # detached 
 dsd_attempt.py gate   --run-root … --phase-id … --task-id … [--surface]
 ```
 
-Use `--surface` only when the parent is about to interpret that result. Intermediate specialist gates return mechanics only. Wait quiescently; no terminal event means wait again with no model polling/narration. Role changes use fresh contexts; same-role continuation is transport/recovery only. Load `WORKSPACE.md` for abnormal lifecycle handling.
-
-Normal mutation path:
+Use `--surface` only at a parent semantic boundary; intermediate gates return mechanics only. Wait quiescently: no terminal event means wait again without model polling/narration. Role changes use fresh contexts; same-role continuation is transport/recovery only.
 
 ```text
 Implementer → fresh Reviewer
@@ -71,12 +62,12 @@ Implementer → fresh Reviewer
                   Clerk
 ```
 
-Missing technical proof goes to targeted Verification/Review, never Clerk or a report-format rerun.
+Missing technical proof goes to targeted Verification/Review, never Clerk or report-format rerun. Load `WORKSPACE.md` only for abnormal lifecycle handling.
 
 ## Integrity, phase, human boundary
 
-A clean mechanical gate means **safe to interpret**, never semantic PASS. Hard failures are objective integrity failures only; worker prose is natural engineering evidence, not a machine protocol. The parent makes semantic decisions and `accept-task` records their evidence provenance.
+A clean mechanical gate means **safe to interpret**, never semantic PASS. Hard failures are objective integrity failures only; worker prose is natural evidence. The parent makes semantic decisions and `accept-task` records their evidence provenance.
 
-Phase close: finish writers → exercise every selector/pointer/promotion/finalization operation that will establish or refer to the final snapshot → freeze → required post-barrier verification → fresh Phase Auditor → **parent phase judgment**. Finalization must not require a later mutation of any artifact inside that same snapshot or create a self-invalidating dependency cycle. This is the normal place for parent targeted technical verification; any later mutation invalidates stale phase evidence.
+Phase close: finish writers → exercise every selector/pointer/promotion/finalization operation that will establish or refer to the final snapshot → freeze → required post-barrier verification → fresh Phase Auditor → **parent phase judgment**. Finalization must not require later mutation of an artifact inside that snapshot or create a self-invalidating dependency cycle. Any later mutation invalidates stale phase evidence.
 
-Ask the human only for genuinely uninferable authority, access/authorization, destructive/paid/live permission, unsafe concurrency, persistent worker unavailability, or irreconcilable authority conflict. Give the finding and recommendation, not a menu.
+Ask the human only for uninferable authority, access/authorization, destructive/paid/live permission, unsafe concurrency, persistent worker unavailability, or irreconcilable authority conflict. Give the finding and recommendation, not a menu.
