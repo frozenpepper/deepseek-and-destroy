@@ -50,7 +50,7 @@ At run level keep execution status, one exact `next_action`, worker-rules/runtim
 
 No terminal event blocks normal relaunch. Recovery may use `--supersede-incomplete` only after establishing the old worker cannot still write; history records `lifecycle-incomplete`/`superseded`, never a fake exit.
 
-`terminal.json` proves lifecycle end, not semantic correctness. A terminal attempt without usable report gates to `report-recovery`. `gate` stores objective integrity and may bind current or archived attempts; worker prose is omitted unless `--surface` is requested.
+`terminal.json` proves lifecycle end, not semantic correctness, and binds the scope diff frozen immediately after worker return; later gates reuse that evidence instead of re-reading the changed worktree. A terminal attempt without usable report gates to `report-recovery`; worker prose is omitted unless `--surface` is requested.
 
 A clean gate means **safe to interpret**, never semantic PASS.
 

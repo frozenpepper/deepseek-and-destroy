@@ -1,5 +1,14 @@
 # Changelog
 
+## v15.4.5 — Terminal-bound scope and cheaper follow-on routing
+
+- Freeze each attempt's scope comparison immediately after worker/native-Task return and bind its exact path/hash into `terminal.json`; later gate calls reuse the frozen bytes, so post-terminal worktree changes cannot flip an attempt from FAIL to PASS or PASS to FAIL.
+- For historical attempts without terminal-bound scope, reuse the first existing scope diff; if none exists, create one legacy frozen diff once and reuse it.
+- Tighten resume doctrine: identify runs only from DSD state metadata, use `state.run_root` verbatim for helpers, and never inspect plans/git/reports/session history merely to identify the current run.
+- Tighten contract economy: follow-on contracts never restate readable reviewed authority; they name exact steps/sections, write scope, and only the delta not already stated there.
+- Clarify `accept-task --evidence-gate`: for mutating contracts it is the fresh Reviewer gate; separate semantic-evidence arguments are only for an optional Clerk report.
+- No new orchestration layer, state field, semantic parser, or document.
+
 ## v15.4.4 — State-first resume discipline
 
 - Make live `state.json` the explicit authority for current execution on fresh-session resume; stale HANDOVER/chat/session notes cannot override active task/attempt/`next_action`.

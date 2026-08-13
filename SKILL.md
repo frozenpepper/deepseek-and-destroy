@@ -30,7 +30,7 @@ Use the smallest sufficient evidence: **mechanics → bounded `--surface` → Cl
 
 - Never read Implementer/Fixer output when another specialist is the next consumer; pass its immutable evidence onward.
 - Never rerun tests, grep source, recompute hashes, or re-review a clean fresh review except for phase approval or a parent-only escalation.
-- Contracts are **deltas over referenced authority**: objective, exact write scope, acceptance delta, needed verification. Point to readable plan/ADR/source/recorded decision; do not restate it.
+- Contracts are **deltas over reviewed authority**. Never restate readable authority: name the exact step/sections, write boundary, and only requirements not already stated there.
 - If DSD mechanics fail, delegate bounded framework investigation to a cheap worker when possible. Premium source archaeology is a last resort to restore delegation.
 - **Routine execution is silent.** No user narration for launches, waits, gates, reviews, fixes, or task acceptance. Speak only for major decision/escalation, concise reviewed phase-end result, or direct user request.
 
@@ -38,7 +38,7 @@ Use the smallest sufficient evidence: **mechanics → bounded `--surface` → Cl
 
 Normal parent context is this file + one harness adapter. Load only when needed: `WORKSPACE.md` for abnormal lifecycle/recovery/barriers; `OPENCODE.md` for transport trouble; `COMPACTION.md` for checkpoint recovery; `PROMPTS.md` for task/handoff authoring/debugging. Workers get run facts + `worker/COMMON.md` + one role + task; proof recipes only when explicitly requested.
 
-On a fresh parent session, **do not reconstruct the run**. Identify the exact run from explicit binding or minimal state metadata and read live `state.json` first; it outranks HANDOVER/chat/session notes for current execution. Execute a mechanical `next_action` immediately. For a semantic `next_action`, read only its named decision/evidence/authority and expand only if necessary. If active runs remain genuinely ambiguous, require exact run authority—never resolve identity through broad archaeology.
+On a fresh parent session, **do not reconstruct the run**. Resolve run identity only from explicit binding or minimal DSD `state.json` metadata—never from plans, git history, reports, or session history—then read live state first. Use `state.run_root` verbatim for helpers. Execute a mechanical `next_action` immediately; for a semantic one, read only its named decision/evidence/authority and expand only if necessary. If active runs remain genuinely ambiguous, require exact run authority.
 
 ## Normal execution
 

@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from _contract import validate_role_contract
 from _roles import ROLE_NAMES
 from _rules_snapshot import sha256_file, verify_snapshot
-from run_worker import atomic_json, now, reserve_attempt
+from run_worker import atomic_json, freeze_scope_at_terminal, now, reserve_attempt
 
 
 def absolute(path: Path, label: str) -> Path:
@@ -125,6 +125,27 @@ def finalize(args: argparse.Namespace) -> int:
         raise ValueError(f"invalid reserved role: {role!r}")
     status = args.status
     exit_code = 0 if status == "completed" else (args.exit_code if args.exit_code is not None else 1)
+    process_ended_at = now()
+    project_root = None
+    for ancestor in [event_dir, *event_dir.parents]:
+        if ancestor.name == "DeepSeekAndDestroy":
+            project_root = ancestor.parent.resolve()
+            break
+    frozen_scope = None
+    scope_error = None
+    if project_root is None:
+        scope_error = "cannot derive project root from native event directory"
+    else:
+        baseline_raw = reservation.get("scope_baseline")
+        if not isinstance(baseline_raw, str):
+            scope_error = "launch reservation lacks scope_baseline"
+        else:
+            baseline = Path(baseline_raw).resolve()
+            frozen_scope, scope_error = freeze_scope_at_terminal({
+                "event_dir": event_dir,
+                "project_root": project_root,
+                "scope_baseline": baseline,
+            })
     terminal = {
         "format": "dsd-worker-terminal-v3",
         "status": status,
@@ -139,7 +160,10 @@ def finalize(args: argparse.Namespace) -> int:
         "launch_reservation_sha256": reservation_sha,
         "reserved_at": reservation.get("reserved_at"),
         "started_at": attempt.get("started_at"),
+        "process_ended_at": process_ended_at,
         "ended_at": now(),
+        "terminal_scope": frozen_scope,
+        "terminal_scope_error": scope_error,
     }
     atomic_json(terminal_path, terminal)
     try:

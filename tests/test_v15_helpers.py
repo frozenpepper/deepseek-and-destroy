@@ -567,9 +567,45 @@ raise SystemExit(2)
             self.assertEqual(cp.returncode,0,cp.stderr)
             terminal=json.loads((event/"terminal.json").read_text())
             self.assertEqual(terminal["session_id"],"ses_resume")
+            self.assertIsNone(terminal["terminal_scope_error"])
+            scope_binding = terminal["terminal_scope"]
+            self.assertTrue(Path(scope_binding["path"]).is_file())
+            self.assertEqual(hashlib.sha256(Path(scope_binding["path"]).read_bytes()).hexdigest(), scope_binding["sha256"])
 
 
 
+
+    def test_native_finalize_binds_frozen_scope_into_terminal(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); project = root / "project"; project.mkdir()
+            run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
+            prompt = run / "prompt.txt"; prompt.write_text("Native task")
+            scope = run / "scope-baseline.json"; scope.write_text(json.dumps({
+                "format": "deepseek-and-destroy-scope-snapshot-v4", "project_root": str(project.resolve()),
+                "captured_at": "2026-08-13T00:00:00+00:00", "inventory_mode": "paths",
+                "exclude_prefixes": [], "extra_inventory_specs": [], "entries": {}
+            }) + "\n")
+            task, rules = self.make_launch_authority(run, "U4")
+            event = run / "native-event"; report = event / "report.md"; log = event / "worker.log"
+            reserve = self.run_cmd([
+                PYTHON, str(ROOT / "scripts" / "native_worker_attempt.py"), "reserve",
+                "--harness", "kilo", "--project-root", str(project.resolve()), "--run-root", str(run.resolve()),
+                "--task-id", "U4", "--role", "reviewer", "--attempt", "1",
+                "--prompt-file", str(prompt.resolve()), "--task-contract", str(task.resolve()),
+                "--worker-rules", str(rules.resolve()), "--scope-baseline", str(scope.resolve()),
+                "--report", str(report.resolve()), "--event-dir", str(event.resolve()), "--log", str(log.resolve()),
+            ])
+            self.assertEqual(reserve.returncode, 0, reserve.stdout + reserve.stderr)
+            finalize = self.run_cmd([
+                PYTHON, str(ROOT / "scripts" / "native_worker_attempt.py"), "finalize",
+                "--event-dir", str(event.resolve()), "--status", "completed",
+            ])
+            self.assertEqual(finalize.returncode, 0, finalize.stdout + finalize.stderr)
+            terminal = json.loads((event / "terminal.json").read_text())
+            self.assertIsNone(terminal["terminal_scope_error"])
+            frozen = Path(terminal["terminal_scope"]["path"])
+            self.assertTrue(frozen.is_file())
+            self.assertEqual(hashlib.sha256(frozen.read_bytes()).hexdigest(), terminal["terminal_scope"]["sha256"])
 
     def test_check_state_requires_next_action_not_next_role(self):
         with tempfile.TemporaryDirectory() as td:

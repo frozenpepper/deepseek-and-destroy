@@ -108,7 +108,7 @@ class V15IntegrityTest(unittest.TestCase):
             if _sys.path and _sys.path[0] == scripts:
                 _sys.path.pop(0)
 
-    def test_mutating_scope_gate_allows_declared_path_and_rejects_extra_path(self):
+    def test_historical_scope_gate_freezes_first_diff_and_does_not_recompute(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); project = self.init_git_project(root)
             (project / "allowed.py").write_text("VALUE=1\n")
@@ -128,14 +128,64 @@ class V15IntegrityTest(unittest.TestCase):
                 "--role", "implementer", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()), "--json",
             ])
             self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
+            first = json.loads(clean.stdout)
+            first_diff = Path(first["scope"]["diff"]); first_hash = first["scope"]["diff_sha256"]
             (project / "outside.py").write_text("OTHER=2\n")
-            bad = self.run_cmd([
+            again = self.run_cmd([
                 PYTHON, str(ROOT / "scripts" / "evidence_gate.py"),
                 "--run-root", str(run.resolve()), "--task", str(task.resolve()), "--report", str(report.resolve()),
                 "--role", "implementer", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()), "--json",
             ])
-            self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
-            self.assertTrue(any("SCOPE-DRIFT" in e and "outside.py" in e for e in json.loads(bad.stdout)["errors"]))
+            self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+            second = json.loads(again.stdout)
+            self.assertEqual(Path(second["scope"]["diff"]), first_diff)
+            self.assertEqual(second["scope"]["diff_sha256"], first_hash)
+            self.assertNotIn("outside.py", [x.get("path") for x in json.loads(first_diff.read_text())["changed"]])
+
+    def test_terminal_bound_scope_is_stable_across_regate_and_hash_protected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); project = self.init_git_project(root)
+            (project / "allowed.py").write_text("VALUE=1\n")
+            (project / "outside.py").write_text("OTHER=1\n")
+            self.run_cmd(["git", "add", "allowed.py", "outside.py"], cwd=project)
+            self.assertEqual(self.run_cmd(["git", "commit", "-m", "base"], cwd=project).returncode, 0)
+            run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
+            task = run / "contract.md"; task.write_text("# Task\n## Allowed source changes\n- `allowed.py`\n")
+            report = run / "impl.md"; self.impl_report(report)
+            baseline = self.capture(project, run)
+            legacy_terminal = self.make_terminal_event(run, task, report, baseline, "implementer")
+            legacy = json.loads(legacy_terminal.read_text())
+            event = legacy_terminal.parent
+            reservation = event / "launch-reservation.json"
+            reservation_data = {
+                "format": "dsd-worker-launch-reservation-v2", "task_id": "U1", "role": "implementer", "attempt": 1,
+                "writes_project": True, "report": str(report.resolve()),
+                "prompt_file": legacy["prompt_file"], "prompt_sha256": legacy["prompt_sha256"],
+                "task_contract": str(task.resolve()), "task_contract_sha256": legacy["task_contract_sha256"],
+                "worker_rules": legacy["worker_rules"], "worker_rules_sha256": legacy["worker_rules_sha256"],
+                "worker_rules_manifest": legacy["worker_rules_manifest"], "worker_rules_manifest_sha256": legacy["worker_rules_manifest_sha256"],
+                "scope_baseline": str(baseline.resolve()), "scope_baseline_sha256": legacy["scope_baseline_sha256"],
+            }
+            reservation.write_text(json.dumps(reservation_data, indent=2) + "\n")
+            (project / "allowed.py").write_text("VALUE=2\n")
+            frozen = event / "scope-diff.json"
+            cmp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "scope_snapshot.py"), "compare", "--root", str(project.resolve()), "--baseline", str(baseline.resolve()), "--output", str(frozen.resolve())])
+            self.assertEqual(cmp.returncode, 0, cmp.stdout + cmp.stderr)
+            legacy_terminal.write_text(json.dumps({
+                "format": "dsd-worker-terminal-v3", "status": "completed", "exit_code": 0, "task_id": "U1",
+                "role": "implementer", "attempt": 1, "launch_reservation": str(reservation.resolve()),
+                "launch_reservation_sha256": hashlib.sha256(reservation.read_bytes()).hexdigest(),
+                "terminal_scope": {"path": str(frozen.resolve()), "sha256": hashlib.sha256(frozen.read_bytes()).hexdigest()},
+                "terminal_scope_error": None,
+            }))
+            cmd = [PYTHON, str(ROOT / "scripts" / "evidence_gate.py"), "--run-root", str(run.resolve()), "--task", str(task.resolve()), "--report", str(report.resolve()), "--role", "implementer", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()), "--terminal-event", str(legacy_terminal.resolve()), "--json"]
+            first = self.run_cmd(cmd); self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            (project / "outside.py").write_text("OTHER=2\n")
+            second = self.run_cmd(cmd); self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+            self.assertEqual(json.loads(first.stdout)["scope"]["diff_sha256"], json.loads(second.stdout)["scope"]["diff_sha256"])
+            frozen.write_text(frozen.read_text() + " ")
+            tampered = self.run_cmd(cmd); self.assertEqual(tampered.returncode, 1, tampered.stdout + tampered.stderr)
+            self.assertTrue(any("terminal scope artifact changed" in e for e in json.loads(tampered.stdout)["errors"]))
 
     def test_mutating_scope_gate_rejects_change_when_no_write_path_declared(self):
         with tempfile.TemporaryDirectory() as td:

@@ -453,9 +453,9 @@ def parser() -> argparse.ArgumentParser:
     g.add_argument("--next-action")
 
     a = sub.add_parser("accept-task", aliases=["accept"], parents=[common])
-    a.add_argument("--evidence-gate", required=True, help="accepted source attempt integrity gate")
-    a.add_argument("--semantic-evidence", help="optional Clerk/small semantic report consumed by parent; omit when parent consumed source report directly")
-    a.add_argument("--semantic-evidence-gate", help="integrity gate bound to --semantic-evidence")
+    a.add_argument("--evidence-gate", required=True, help="gate for the report the parent is accepting; for any mutating contract this is the fresh Reviewer gate, not the Implementer gate")
+    a.add_argument("--semantic-evidence", help="optional separate Clerk report; omit when the parent consumed the accepted Reviewer/source report directly")
+    a.add_argument("--semantic-evidence-gate", help="integrity gate bound to the optional separate --semantic-evidence")
     a.add_argument("--next-action")
 
     n = sub.add_parser("set-next")

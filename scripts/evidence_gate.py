@@ -33,16 +33,6 @@ def path_allowed(path: str, prefixes: list[str]) -> bool:
     return any(normalized == p or normalized.startswith(p.rstrip("/") + "/") for p in prefixes)
 
 
-def next_numbered_path(base: Path) -> Path:
-    if not base.exists():
-        return base
-    for index in range(2, 10000):
-        candidate = base.with_name(f"{base.stem}-{index:02d}{base.suffix}")
-        if not candidate.exists():
-            return candidate
-    raise RuntimeError(f"cannot allocate immutable evidence path near {base}")
-
-
 def run_scope_compare(skill_root: Path, project_root: Path, baseline: Path, output: Path) -> tuple[int, dict[str, Any]]:
     cp = subprocess.run([
         sys.executable, str(skill_root / "scripts" / "scope_snapshot.py"), "compare",
@@ -50,6 +40,75 @@ def run_scope_compare(skill_root: Path, project_root: Path, baseline: Path, outp
     ], text=True, capture_output=True, check=False)
     data = json.loads(output.read_text()) if output.exists() else {}
     return cp.returncode, data
+
+
+def frozen_scope_for_terminal(
+    *, terminal: dict[str, Any], terminal_event: Path, run_root: Path, project_root: Path,
+    baseline: Path, skill_root: Path, requested_output: Path | None,
+) -> tuple[Path | None, dict[str, Any], list[str], list[str]]:
+    """Return the immutable scope delta bound to terminal lifecycle.
+
+    New attempts bind a path+hash in terminal.json. Historical attempts can only
+    freeze the first available post-terminal diff; once created/selected it is reused
+    and never recomputed on later gate calls.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    binding = terminal.get("terminal_scope")
+    if isinstance(binding, dict):
+        raw = binding.get("path")
+        digest = binding.get("sha256")
+        if not isinstance(raw, str):
+            return None, {}, ["terminal scope binding lacks path"], warnings
+        path = resolve_run_binding(run_root, raw)
+        try:
+            path.relative_to(terminal_event.parent)
+        except ValueError:
+            errors.append(f"terminal scope artifact is outside attempt directory: {path}")
+        if not path.is_file():
+            errors.append(f"terminal scope artifact missing: {path}")
+            return path, {}, errors, warnings
+        if not isinstance(digest, str) or len(digest) != 64:
+            errors.append("terminal scope sha256 missing/invalid")
+        elif sha256_file(path) != digest.lower():
+            errors.append("immutable terminal scope artifact changed after lifecycle binding")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            errors.append(f"terminal scope artifact unreadable: {exc}")
+            data = {}
+        return path, data, errors, warnings
+
+    scope_error = terminal.get("terminal_scope_error")
+    if isinstance(scope_error, str) and scope_error.strip():
+        errors.append(f"terminal scope capture failed: {scope_error.strip()}")
+        return None, {}, errors, warnings
+
+    # Historical terminal: preserve the first already-produced scope diff when one
+    # exists. Otherwise create exactly one legacy frozen diff and reuse it forever.
+    warnings.append("historical attempt lacks terminal-bound scope; using first immutable post-terminal scope artifact")
+    first = terminal_event.parent / "scope-diff.json"
+    legacy = terminal_event.parent / "scope-diff-legacy.json"
+    if first.is_file():
+        path = first
+    elif legacy.is_file():
+        path = legacy
+    else:
+        path = requested_output if requested_output is not None else legacy
+        if path.exists():
+            errors.append(f"historical scope output already exists but is not reusable: {path}")
+            return path, {}, errors, warnings
+        rc, data = run_scope_compare(skill_root, project_root, baseline, path)
+        if rc not in (0, 1) or not path.is_file():
+            errors.append("historical scope comparison helper failed")
+            return path, data, errors, warnings
+        return path, data, errors, warnings
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        errors.append(f"historical frozen scope artifact unreadable: {exc}")
+        data = {}
+    return path, data, errors, warnings
 
 
 def reservation_from_terminal(terminal: dict[str, Any], run_root: Path) -> tuple[dict[str, Any] | None, list[str]]:
@@ -286,6 +345,8 @@ def main() -> int:
         errors.append(f"SCOPE-BASELINE-MISSING: {baseline}")
     elif not project_root.is_dir():
         errors.append(f"project root missing/not directory: {project_root}")
+    elif terminal_event is None or not terminal_event.is_file():
+        errors.append("terminal event unavailable for frozen scope binding")
     else:
         try:
             baseline_data = json.loads(baseline.read_text(encoding="utf-8"))
@@ -295,31 +356,39 @@ def main() -> int:
             if exclusions != ["DeepSeekAndDestroy"]:
                 errors.append("SCOPE-BASELINE-UNSAFE: only DeepSeekAndDestroy may be excluded")
             requested = run_path(args.scope_output)
-            base_out = (terminal_event.parent if terminal_event is not None else report.parent) / "scope-diff.json"
-            scope_diff = requested if requested is not None else next_numbered_path(base_out)
-            if requested is not None and scope_diff.exists():
-                raise ValueError(f"immutable scope output already exists: {scope_diff}")
-            rc, scope_result = run_scope_compare(skill_root, project_root, baseline, scope_diff)
-            if rc not in (0, 1):
-                errors.append("scope comparison helper failed")
-            changed = scope_result.get("changed", []) if isinstance(scope_result, dict) else []
-            changed_paths = [str(x.get("path", "")) for x in changed if x.get("path")]
-            outside = [p for p in changed_paths if writes_project and not path_allowed(p, allowed_writes)]
-            if outside:
-                errors.append(f"SCOPE-DRIFT: {len(outside)} path(s) outside Allowed source changes: " + ", ".join(outside[:12]))
-            if not writes_project and changed_paths:
-                errors.append(f"READONLY-SCOPE-MOVED: {len(changed_paths)} project path(s)")
-            scope_summary = {
-                "baseline": str(baseline),
-                "diff": str(scope_diff),
-                "changed_count": len(changed_paths),
-                "added_count": len(scope_result.get("added", [])),
-                "removed_count": len(scope_result.get("removed", [])),
-                "modified_count": len(scope_result.get("modified", [])),
-                "extra_inventory": list(baseline_data.get("extra_inventory_specs", [])),
-            }
+            scope_diff, scope_result, scope_errors, scope_warnings = frozen_scope_for_terminal(
+                terminal=terminal, terminal_event=terminal_event, run_root=run_root,
+                project_root=project_root, baseline=baseline, skill_root=skill_root,
+                requested_output=requested,
+            )
+            errors.extend(scope_errors)
+            warnings.extend(scope_warnings)
+            if scope_result:
+                if scope_result.get("format") != "deepseek-and-destroy-scope-comparison-v4":
+                    errors.append(f"unsupported frozen scope format: {scope_result.get('format')!r}")
+                if str(scope_result.get("project_root") or "") != str(project_root):
+                    errors.append("frozen scope project_root mismatch")
+                if scope_result.get("baseline_captured_at") != baseline_data.get("captured_at"):
+                    errors.append("frozen scope does not bind the reserved baseline capture")
+                changed = scope_result.get("changed", []) if isinstance(scope_result, dict) else []
+                changed_paths = [str(x.get("path", "")) for x in changed if isinstance(x, dict) and x.get("path")]
+                outside = [p for p in changed_paths if writes_project and not path_allowed(p, allowed_writes)]
+                if outside:
+                    errors.append(f"SCOPE-DRIFT: {len(outside)} path(s) outside Allowed source changes: " + ", ".join(outside[:12]))
+                if not writes_project and changed_paths:
+                    errors.append(f"READONLY-SCOPE-MOVED: {len(changed_paths)} project path(s)")
+                scope_summary = {
+                    "baseline": str(baseline),
+                    "diff": str(scope_diff) if scope_diff else None,
+                    "diff_sha256": sha256_file(scope_diff) if scope_diff and scope_diff.is_file() else None,
+                    "changed_count": len(changed_paths),
+                    "added_count": len(scope_result.get("added", [])),
+                    "removed_count": len(scope_result.get("removed", [])),
+                    "modified_count": len(scope_result.get("modified", [])),
+                    "extra_inventory": list(baseline_data.get("extra_inventory_specs", [])),
+                }
         except Exception as exc:
-            errors.append(f"scope comparison failed: {exc}")
+            errors.append(f"frozen scope validation failed: {exc}")
 
     ready = not errors and report_state == "present"
     needs_report_recovery = not errors and report_state != "present"

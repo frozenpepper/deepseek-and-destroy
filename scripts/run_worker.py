@@ -239,6 +239,36 @@ def terminal_error(args: argparse.Namespace, paths: dict[str, Path], message: st
     return code
 
 
+def freeze_scope_at_terminal(paths: dict[str, Path]) -> tuple[dict[str, Any] | None, str | None]:
+    """Freeze the project scope delta immediately after worker exit.
+
+    The terminal event binds this immutable artifact so later worktree movement cannot
+    change an attempt's integrity result.
+    """
+    output = paths["event_dir"] / "scope-diff.json"
+    if output.exists():
+        return None, f"terminal scope artifact already exists: {output}"
+    script = Path(__file__).resolve().parent / "scope_snapshot.py"
+    cp = subprocess.run([
+        sys.executable, str(script), "compare",
+        "--root", str(paths["project_root"]),
+        "--baseline", str(paths["scope_baseline"]),
+        "--output", str(output),
+    ], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if cp.returncode not in (0, 1) or not output.is_file():
+        detail = (cp.stderr or cp.stdout).strip()
+        return None, f"terminal scope capture failed ({cp.returncode}): {detail[:500]}"
+    try:
+        data = json.loads(output.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return None, f"terminal scope artifact unreadable: {exc}"
+    return {
+        "path": str(output),
+        "sha256": sha256_file(output),
+        "compared_at": data.get("compared_at"),
+    }, None
+
+
 def child_run(args: argparse.Namespace, paths: dict[str, Path], reserved_at: str) -> int:
     project_root = paths["project_root"]
     prompt_file = paths["prompt"]
@@ -301,6 +331,8 @@ def child_run(args: argparse.Namespace, paths: dict[str, Path], reserved_at: str
         atomic_json(event_dir / "attempt.json", attempt_data)
         rc = proc.wait()
 
+    process_ended_at = now()
+    frozen_scope, scope_error = freeze_scope_at_terminal(paths)
     if args.resume_session:
         session_id, session_error = args.resume_session, None
     else:
@@ -322,7 +354,10 @@ def child_run(args: argparse.Namespace, paths: dict[str, Path], reserved_at: str
         "launch_reservation_sha256": reservation_sha,
         "reserved_at": reserved_at,
         "started_at": started,
+        "process_ended_at": process_ended_at,
         "ended_at": now(),
+        "terminal_scope": frozen_scope,
+        "terminal_scope_error": scope_error,
     }
     atomic_json(event_dir / "terminal.json", terminal)
     return rc
