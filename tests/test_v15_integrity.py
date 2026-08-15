@@ -108,6 +108,56 @@ class V15IntegrityTest(unittest.TestCase):
             if _sys.path and _sys.path[0] == scripts:
                 _sys.path.pop(0)
 
+    def test_reportless_zero_exit_empty_scope_is_factually_labeled_no_change(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); project = self.init_git_project(root)
+            (project / "source.py").write_text("VALUE=1\n")
+            self.run_cmd(["git", "add", "source.py"], cwd=project)
+            self.assertEqual(self.run_cmd(["git", "commit", "-m", "base"], cwd=project).returncode, 0)
+            run = project / "DeepSeekAndDestroy" / "run"; run.mkdir(parents=True)
+            task = run / "contract.md"; task.write_text("# Task\n## Allowed source changes\n- `source.py`\n")
+            report = run / "report.md"
+            skeleton = b"DSD_WORKER_REPORT_PLACEHOLDER_V1\n"
+            report.write_bytes(skeleton)
+            baseline = self.capture(project, run)
+            legacy_terminal = self.make_terminal_event(run, task, report, baseline, "implementer")
+            legacy = json.loads(legacy_terminal.read_text())
+            event = legacy_terminal.parent
+            reservation = event / "launch-reservation.json"
+            reservation_data = {
+                "format": "dsd-worker-launch-reservation-v2", "task_id": "U1", "role": "implementer", "attempt": 1,
+                "writes_project": True, "report": str(report.resolve()),
+                "report_skeleton_sha256": hashlib.sha256(skeleton).hexdigest(),
+                "prompt_file": legacy["prompt_file"], "prompt_sha256": legacy["prompt_sha256"],
+                "task_contract": str(task.resolve()), "task_contract_sha256": legacy["task_contract_sha256"],
+                "worker_rules": legacy["worker_rules"], "worker_rules_sha256": legacy["worker_rules_sha256"],
+                "worker_rules_manifest": legacy["worker_rules_manifest"], "worker_rules_manifest_sha256": legacy["worker_rules_manifest_sha256"],
+                "scope_baseline": str(baseline.resolve()), "scope_baseline_sha256": legacy["scope_baseline_sha256"],
+            }
+            reservation.write_text(json.dumps(reservation_data, indent=2) + "\n")
+            frozen = event / "scope-diff.json"
+            cmp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "scope_snapshot.py"), "compare", "--root", str(project.resolve()), "--baseline", str(baseline.resolve()), "--output", str(frozen.resolve())])
+            self.assertEqual(cmp.returncode, 0, cmp.stdout + cmp.stderr)
+            legacy_terminal.write_text(json.dumps({
+                "format": "dsd-worker-terminal-v3", "status": "completed", "exit_code": 0, "task_id": "U1",
+                "role": "implementer", "attempt": 1, "launch_reservation": str(reservation.resolve()),
+                "launch_reservation_sha256": hashlib.sha256(reservation.read_bytes()).hexdigest(),
+                "terminal_scope": {"path": str(frozen.resolve()), "sha256": hashlib.sha256(frozen.read_bytes()).hexdigest()},
+                "terminal_scope_error": None,
+            }))
+            cp = self.run_cmd([
+                PYTHON, str(ROOT / "scripts" / "evidence_gate.py"),
+                "--run-root", str(run.resolve()), "--task", str(task.resolve()), "--report", str(report.resolve()),
+                "--role", "implementer", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()),
+                "--terminal-event", str(legacy_terminal.resolve()), "--json",
+            ])
+            self.assertEqual(cp.returncode, 4, cp.stdout + cp.stderr)
+            data = json.loads(cp.stdout)
+            self.assertTrue(data["integrity_ok"]); self.assertTrue(data["needs_report_recovery"])
+            self.assertEqual(data["report_state"], "launcher-skeleton")
+            self.assertEqual(data["scope"]["changed_count"], 0)
+            self.assertEqual(data["attempt_output"], "reportless-no-change")
+
     def test_historical_scope_gate_freezes_first_diff_and_does_not_recompute(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); project = self.init_git_project(root)
@@ -187,7 +237,7 @@ class V15IntegrityTest(unittest.TestCase):
             tampered = self.run_cmd(cmd); self.assertEqual(tampered.returncode, 1, tampered.stdout + tampered.stderr)
             self.assertTrue(any("terminal scope artifact changed" in e for e in json.loads(tampered.stdout)["errors"]))
 
-    def test_mutating_scope_gate_rejects_change_when_no_write_path_declared(self):
+    def test_explicit_no_write_restriction_rejects_mutation(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); project = self.init_git_project(root)
             (project / "source.py").write_text("x=1\n")
@@ -205,7 +255,7 @@ class V15IntegrityTest(unittest.TestCase):
                 "--role", "implementer", "--project-root", str(project.resolve()), "--scope-baseline", str(baseline.resolve()), "--json",
             ])
             self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
-            self.assertTrue(any("SCOPE-DRIFT" in e for e in json.loads(cp.stdout)["errors"]))
+            self.assertTrue(any("WRITE-RESTRICTION" in e for e in json.loads(cp.stdout)["errors"]))
 
     def test_run_worker_duplicate_attempt_reservation_blocks_second_launch(self):
         with tempfile.TemporaryDirectory() as td:
@@ -339,7 +389,6 @@ class V15IntegrityTest(unittest.TestCase):
                 "phases": {
                     "p1": {
                         "status": "in-progress",
-                        "gate_barrier": {"status": "OPEN"},
                         "tasks": {
                             "U1": {
                                 "status": "in-progress",
@@ -410,46 +459,6 @@ class V15IntegrityTest(unittest.TestCase):
             self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
             self.assertIn("immutable prompt_file changed after reservation", bad.stdout)
 
-    def test_check_state_rejects_closed_phase_barrier_with_active_writer(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            snapshot = root / "phase-snapshot.json"; snapshot.write_text("{}\n")
-            prompt = root / "prompt.txt"; prompt.write_text("p\n")
-            baseline = root / "baseline.json"; baseline.write_text("{}\n")
-            reservation = root / "reservation.json"
-            reservation.write_text(json.dumps({
-                "prompt_file": str(prompt.resolve()),
-                "prompt_sha256": hashlib.sha256(prompt.read_bytes()).hexdigest(),
-                "scope_baseline": str(baseline.resolve()),
-                "scope_baseline_sha256": hashlib.sha256(baseline.read_bytes()).hexdigest(),
-                "role": "implementer", "attempt": 1,
-            }))
-            state = {
-                "execution_status": "active", "next_action": "audit phase",
-                "context_checkpoint": {"status": "none"},
-                "phases": {"p1": {
-                    "status": "auditing",
-                    "gate_barrier": {"status": "CLOSED", "snapshot": str(snapshot.resolve())},
-                    "tasks": {"U1": {
-                        "status": "in-progress",                         "current_attempt": {
-                            "role": "implementer", "attempt": 1, "writes_project": True,
-                            "prompt_path": str(prompt.resolve()),
-                            "scope_baseline": str(baseline.resolve()),
-                            "scope_baseline_sha256": hashlib.sha256(baseline.read_bytes()).hexdigest(),
-                            "launch_reservation": str(reservation.resolve()),
-                            "report_path": str((root / "report.md").resolve()),
-                            "event_dir": str(root.resolve()),
-                            "terminal_event": str((root / "terminal.json").resolve()),
-                            "monitor_pid": os.getpid(), "launched_at": "now", "liveness": "confirmed",
-                        },
-                    }},
-                }},
-            }
-            path = root / "state.json"; path.write_text(json.dumps(state))
-            cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "check_state.py"), str(path.resolve())])
-            self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
-            self.assertIn("CLOSED phase barrier cannot coexist with an active project writer", cp.stdout)
-
     def test_evidence_gate_rejects_bound_authority_tampering(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); project = self.init_git_project(root)
@@ -512,7 +521,7 @@ class V15IntegrityTest(unittest.TestCase):
             cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "render_task_contract.py"), "--spec", str(spec)])
             self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
             data = json.loads(cp.stdout)
-            self.assertTrue(data["writes_project"])
+            self.assertEqual(data["write_restriction"], [".github/workflows"])
             self.assertIn("`.github/workflows`", contract.read_text())
 
     def test_scope_snapshot_refuses_to_overwrite_immutable_evidence(self):
@@ -598,7 +607,7 @@ class V15IntegrityTest(unittest.TestCase):
             self.assertIn("runtime/lock-a", data["removed"])
             self.assertEqual(data["extra_inventory_specs"], ["runtime"])
 
-    def test_verification_role_can_be_prebarrier_writer_when_contract_declares_paths(self):
+    def test_verification_role_can_write_when_contract_declares_paths(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); project = self.init_git_project(root)
             (project / "generated.txt").write_text("old\n")

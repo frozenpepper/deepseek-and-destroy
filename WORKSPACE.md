@@ -1,12 +1,11 @@
 # DSD Workspace Contract
 
-Cold reference for state/evidence/recovery/concurrency/barriers. Normal tasks use `dsd_attempt.py` without repeatedly loading this file.
+Cold reference for state/evidence/recovery/concurrency. Normal tasks use `dsd_attempt.py` without repeatedly loading this file.
 
 ## Run layout
 
 ```text
 DeepSeekAndDestroy/plans/<plan-id>/runs/<run-id>/
-  manifest.json
   state.json
   plan-reference.md
   authority-index.json
@@ -15,7 +14,6 @@ DeepSeekAndDestroy/plans/<plan-id>/runs/<run-id>/
   major-findings-and-fixes.md
   worker-rules/rNNNN/{WORKER_RULES.md,MANIFEST.json,protocol/...}
   phases/<phase>/
-    phase-snapshot-*.json
     tasks/<task>/
       contracts/rNNNN.md
       attempts/<role>-<n>/
@@ -34,15 +32,15 @@ New attempt evidence is self-contained. Run files are orchestration evidence, no
 
 ## Authority / immutability
 
-Current user instructions and governing project/plan authority define semantics. `state.json` is authoritative for **current execution reality**; immutable task/rules/attempt/gate artifacts prove what actually ran. HANDOVER/chat/progress are optional continuity aids only. If HANDOVER disagrees with live state about the active task/attempt/`next_action`, live state wins.
+`state.json` is authoritative for **current execution reality**; immutable task/rules/attempt/gate artifacts prove what ran. HANDOVER/chat/progress are optional continuity only and never override live task/attempt/`next_action`.
 
 Once consumed by a launch, worker-rules revisions, task contracts, prompt/reservation/baseline bindings, terminal events, gates, and accepted semantic evidence are immutable. New meaning gets a new numbered artifact.
 
 ## Minimal state
 
-State records facts, not routing heuristics. Per task retain the current contract, current attempt/gate, bounded `last_attempt`, status, and accepted evidence bindings. `semantic_report` points to the Reviewer report consumed directly or the optional Clerk report. Do not store regex verdicts, `next_role`, transport counters, dependency prose, or no-progress heuristics.
+State records facts, not routing heuristics. Active tasks keep the contract plus current/bounded prior attempt facts; accepted tasks keep only contract, accepted evidence bindings, and status. Detailed lifecycle stays cold in attempt directories. Do not store regex verdicts, routing counters, dependency prose, or no-progress heuristics.
 
-At run level keep execution status, one exact `next_action`, worker-rules/runtime binding, optional wait/availability state, and checkpoint state. Use `dsd_state.py`; do not hand-patch routine transitions. `check_state.py` validates objective consistency only.
+At run level keep execution status, one exact `next_action`, worker-rules/runtime binding, active wait state, and checkpoint state. Use `dsd_state.py`; do not hand-patch routine transitions. `check_state.py` validates objective consistency only.
 
 ## Attempt lifecycle
 
@@ -50,32 +48,24 @@ At run level keep execution status, one exact `next_action`, worker-rules/runtim
 
 No terminal event blocks normal relaunch. Recovery may use `--supersede-incomplete` only after establishing the old worker cannot still write; history records `lifecycle-incomplete`/`superseded`, never a fake exit.
 
-`terminal.json` proves lifecycle end, not semantic correctness, and binds the scope diff frozen immediately after worker return; later gates reuse that evidence instead of re-reading the changed worktree. A terminal attempt without usable report gates to `report-recovery`; worker prose is omitted unless `--surface` is requested.
+`terminal.json` proves lifecycle end, not semantic correctness, and binds both the exact report bytes/state and compact scope diff observed immediately after worker return; later gates reuse that evidence instead of re-reading mutable artifacts/worktree state. A terminal attempt without usable report gates to `report-recovery`; worker prose is omitted unless `--surface` is requested.
 
 A clean gate means **safe to interpret**, never semantic PASS.
 
 ## Scope
 
-Every attempt compares project paths/content against task start.
+Every attempt records a compact factual project diff at terminal. New Git attempts baseline only dirty/untracked paths plus explicitly named ignored roots, then hash only paths that could have changed; historical full-worktree snapshots remain readable.
 
 - read-only role: any project movement fails integrity;
-- Implementer/Fixer: movement must remain inside exact `Allowed source changes`;
+- Implementer/Fixer: choose their implementation surface; if authority supplied `Allowed source changes`, that explicit boundary is enforced;
 - Verification: read-only unless its contract explicitly grants generated/project write paths;
 - Evidence Clerk and other specialists: project-read-only.
 
-Git-ignored but load-bearing roots belong in task `Extra scope inventory`; baseline/diff recursively detect additions/removals/modifications there. Scope proves movement, not semantic validity. Content/path evidence outranks timestamps.
+`Extra scope inventory` is optional for already-known ignored/load-bearing roots; do not discover paths merely for DSD. Scope records movement, not whether the engineering change was appropriate—that belongs to fresh Review.
 
 ## Interrupted/reportless work
 
-If a worker started but ends without trustworthy usable report evidence:
-1. establish that no writer can still mutate project state;
-2. preserve the immutable attempt;
-3. run objective scope comparison;
-4. source movement is **suspect changes**, never “nothing happened”;
-5. use Recovery for technical disposition; Clerk only interprets existing report material;
-6. any adopt/repair/revert/quarantine is an explicitly authorized writer task followed by fresh review.
-
-Never blindly rerun over unknown interrupted writes.
+If a started worker ends without usable report evidence, first establish that no writer remains live and preserve the attempt. Any recorded movement is **suspect**; use Recovery for disposition, not Clerk. Adoption/repair/revert/quarantine is a normal writer task followed by fresh review. Never blindly rerun over unknown interrupted writes.
 
 ## Worker rules / semantic evidence
 
@@ -85,33 +75,21 @@ Python never decides whether long prose proves requirements or means PASS/FAIL. 
 
 Every project mutation requires **fresh Reviewer provenance** before acceptance. Python may enforce that provenance fact only; it does not judge the review. A Fixer never validates its own repair; role changes use fresh contexts.
 
-## Phase barrier
+## Phase close
 
-A phase audit must describe one frozen source state:
-
-```text
-finish phase writers
-→ close barrier + capture source snapshot
-→ required read-only post-barrier Verification
-→ fresh Phase Auditor
-→ parent phase decision
-```
-
-Any phase-owned mutation reopens the barrier and invalidates prior post-barrier Verification/Audit. The barrier protects concurrency/state identity; it does not decide semantic phase success.
+Finish phase mutations, exercise finalization operations, freeze the intended final state, run fresh read-only Verification and a fresh Phase Auditor, then make the parent phase decision. Any later mutation makes that phase evidence stale and requires fresh verification/audit; no separate barrier state machine exists.
 
 ## Concurrency / waiting / availability
 
-Run directories isolate orchestration history, not source writes. Concurrent orchestrators with overlapping write scope need separate worktrees/branches or explicitly disjoint scopes. If attribution becomes unsafe, stop launching writers until ownership is resolved.
+Assume one intentional project writer per checkout. DSD does not implement file locking or require the parent to pre-plan disjoint write scopes. If another writer is discovered and attribution becomes unsafe, stop writers until ownership is resolved or use an isolated worktree.
 
 Waiting is quiescent. Do not use model turns to poll logs/CPU/repository. Provider/quota/auth failure is infrastructure state, not permission for the premium parent to become the implementation worker. Preserve suspect writes before retrying post-start failures.
 
 ## Resume
 
-A fresh parent first identifies the exact run using explicit binding or minimal candidate `state.json` metadata, then reads the chosen live `state.json`. Do not inspect git history, session notes, historical reports, old contracts, or project architecture merely because the parent session changed.
+A fresh parent identifies the run from explicit binding/minimal `state.json` metadata and reads live state first—never broad git/session/report/contract archaeology merely because the parent changed. Execute mechanical `next_action` immediately; for judgment, read only its named decision/evidence/authority. HANDOVER is cold continuity only.
 
-Execute a mechanically self-contained `next_action` immediately. If the next action requires judgment, read only the decision/evidence/authority pointers needed for that decision. HANDOVER is cold continuity context, not a prerequisite for routine resume.
-
-When several active runs remain genuinely ambiguous, require exact `DSD_RUN_ROOT`/user authority; never infer ownership from broad archaeology. When ownership is explicitly transferred, do not leave the superseded run presented as the current run. Checkpoint details are in `COMPACTION.md`.
+For normal resume, exact run/session identity wins; parent-harness ownership may disambiguate otherwise stale active runs. If ambiguity remains genuine, do not mutate a guessed run. Compaction itself must still proceed. Checkpoint details are in `COMPACTION.md`.
 
 ## Major log
 

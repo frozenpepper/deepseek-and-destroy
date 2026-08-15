@@ -8,11 +8,6 @@
     "docs/plan.md"
   ],
   "inputs": [],
-  "write_paths": [
-    "src/example",
-    "tests/example"
-  ],
-  "extra_inventory": [],
   "acceptance": [
     "The intended production path exhibits the required behavior.",
     "A relevant negative/counterexample path fails safely."

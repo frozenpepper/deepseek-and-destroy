@@ -223,6 +223,7 @@ def reservation_ref(paths: dict[str, Path]) -> tuple[str, str | None]:
 
 def terminal_error(args: argparse.Namespace, paths: dict[str, Path], message: str, code: int = 2, *, started_at: str | None = None) -> int:
     reservation, reservation_sha = reservation_ref(paths)
+    terminal_report, report_error = bind_report_at_terminal(paths)
     atomic_json(paths["event_dir"] / "terminal.json", {
         "format": "dsd-worker-terminal-v3",
         "status": "transport-error",
@@ -235,8 +236,25 @@ def terminal_error(args: argparse.Namespace, paths: dict[str, Path], message: st
         "started_at": started_at,
         "launch_reservation": reservation,
         "launch_reservation_sha256": reservation_sha,
+        "terminal_report": terminal_report,
+        "terminal_report_error": report_error,
     })
     return code
+
+
+def bind_report_at_terminal(paths: dict[str, Path]) -> tuple[dict[str, Any] | None, str | None]:
+    """Bind the exact report bytes/state observed when the worker process ends."""
+    report = paths["report"]
+    if not report.is_file():
+        return {"path": str(report), "sha256": None, "state": "missing"}, None
+    try:
+        reservation = json.loads((paths["event_dir"] / "launch-reservation.json").read_text(encoding="utf-8"))
+        digest = sha256_file(report)
+        skeleton = reservation.get("report_skeleton_sha256")
+        state = "launcher-skeleton" if isinstance(skeleton, str) and digest == skeleton.lower() else "present"
+        return {"path": str(report), "sha256": digest, "state": state}, None
+    except Exception as exc:
+        return None, f"terminal report binding failed: {exc}"
 
 
 def freeze_scope_at_terminal(paths: dict[str, Path]) -> tuple[dict[str, Any] | None, str | None]:
@@ -332,6 +350,7 @@ def child_run(args: argparse.Namespace, paths: dict[str, Path], reserved_at: str
         rc = proc.wait()
 
     process_ended_at = now()
+    terminal_report, report_error = bind_report_at_terminal(paths)
     frozen_scope, scope_error = freeze_scope_at_terminal(paths)
     if args.resume_session:
         session_id, session_error = args.resume_session, None
@@ -356,6 +375,8 @@ def child_run(args: argparse.Namespace, paths: dict[str, Path], reserved_at: str
         "started_at": started,
         "process_ended_at": process_ended_at,
         "ended_at": now(),
+        "terminal_report": terminal_report,
+        "terminal_report_error": report_error,
         "terminal_scope": frozen_scope,
         "terminal_scope_error": scope_error,
     }
@@ -380,7 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--db", type=Path, required=True)
     ap.add_argument("--model", default="opencode-go/deepseek-v4-flash")
     ap.add_argument("--title")
-    ap.add_argument("--resume-session", help="same-role transport/session continuation only; normal cross-role transitions start fresh")
+    ap.add_argument("--resume-session", help="trustworthy same-role continuation for transport/recovery or post-DECISION_REQUIRED resume; normal cross-role transitions start fresh")
     ap.add_argument("--force-read-only", action="store_true", help="reserve this attempt as project-read-only regardless of task write scope; used by routine Evidence Clerk interpretation")
     ap.add_argument("--auto-flag", default="--auto", help="OpenCode permission flag; pass empty string to omit")
     ap.add_argument("--detach", action="store_true", help="spawn the monitor in a detached process and return")

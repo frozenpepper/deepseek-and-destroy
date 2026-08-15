@@ -29,7 +29,7 @@ class V154LifecycleRegressions(unittest.TestCase):
         contract.write_text("# Task\n\nContract revision: r0001\n\n## Allowed source changes\nNONE\n", encoding="utf-8")
         rel_contract = contract.relative_to(run)
         state = {
-            "phases": {"p1": {"status": "in-progress", "gate_barrier": {"status": "OPEN", "snapshot": None}, "tasks": {
+            "phases": {"p1": {"status": "in-progress", "tasks": {
                 "t1": {"status": "prepared", "current_contract": {"revision": 1, "path": str(rel_contract), "sha256": sha(contract)}}
             }}},
             "next_action": "test",
@@ -184,7 +184,7 @@ class V154LifecycleRegressions(unittest.TestCase):
                 "project_worktree": str(project.resolve()), "execution_status": "active", "next_action": "launch",
                 "worker_rules": json.loads(prep.stdout),
                 "worker_runtime": {"harness": "opencode-cli", "model": "fake", "opencode": {"run_db": str((root / "external" / "workers.db").resolve())}},
-                "phases": {"p1": {"status": "in-progress", "gate_barrier": {"status": "OPEN", "snapshot": None}, "tasks": {
+                "phases": {"p1": {"status": "in-progress", "tasks": {
                     "t1": {"status": "prepared", "current_contract": {"revision": 1, "path": str(contract.relative_to(run)), "sha256": sha(contract)}}
                 }}},
             }
@@ -211,7 +211,11 @@ class V154LifecycleRegressions(unittest.TestCase):
             task = json.loads((run / "state.json").read_text())["phases"]["p1"]["tasks"]["t1"]
             self.assertIn(task["status"], {"launching", "in-progress"})
             self.assertEqual(task["current_attempt"]["role"], "reviewer")
-            event = Path(json.loads(launch.stdout)["event_dir"])
+            launch_data = json.loads(launch.stdout)
+            event = Path(launch_data["event_dir"])
+            self.assertEqual(Path(launch_data["terminal_event"]), event / "terminal.json")
+            baseline_data = json.loads((event / "scope-baseline.json").read_text())
+            self.assertEqual(baseline_data["inventory_mode"], "git-dirty")
             wait = subprocess.run(
                 [PYTHON, str(ROOT / "scripts" / "dsd_attempt.py"), "wait",
                  "--run-root", str(run.resolve()), "--phase-id", "p1", "--task-id", "t1", "--timeout", "5"],
@@ -219,10 +223,26 @@ class V154LifecycleRegressions(unittest.TestCase):
             )
             self.assertEqual(wait.returncode, 0, wait.stdout + wait.stderr)
             self.assertTrue((event / "terminal.json").is_file())
+            terminal_data = json.loads((event / "terminal.json").read_text())
+            self.assertEqual(terminal_data["terminal_report"]["state"], "launcher-skeleton")
+            self.assertEqual(terminal_data["terminal_report"]["sha256"], sha(event / "report.md"))
+            self.assertIsInstance(terminal_data.get("terminal_scope"), dict)
             state = json.loads((run / "state.json").read_text())
             task = state["phases"]["p1"]["tasks"]["t1"]
             self.assertEqual(task["status"], "process-exited")
             self.assertFalse(state.get("orchestrator_wait", {}).get("active", False))
+            gate = subprocess.run(
+                [PYTHON, str(ROOT / "scripts" / "dsd_attempt.py"), "gate",
+                 "--run-root", str(run.resolve()), "--phase-id", "p1", "--task-id", "t1"],
+                env=env, cwd=project, text=True, capture_output=True,
+            )
+            self.assertEqual(gate.returncode, 4, gate.stdout + gate.stderr)
+            gate_summary = json.loads(gate.stdout)
+            self.assertEqual(gate_summary["attempt_output"], "reportless-no-change")
+            state = json.loads((run / "state.json").read_text())
+            task = state["phases"]["p1"]["tasks"]["t1"]
+            self.assertEqual(task["status"], "report-recovery")
+            self.assertIn("route reportless-no-change reviewer attempt", state["next_action"])
 
 
 if __name__ == "__main__":

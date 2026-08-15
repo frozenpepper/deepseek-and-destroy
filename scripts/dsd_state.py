@@ -12,10 +12,10 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from _contract import allowed_source_changes
 
 
 def sha256(path: Path) -> str:
@@ -148,7 +148,7 @@ def state_and_task(run_root: Path, phase_id: str, task_id: str, *, create: bool 
     if not isinstance(phases, dict):
         raise ValueError("state.phases is not an object")
     if create:
-        phase = phases.setdefault(phase_id, {"status": "in-progress", "gate_barrier": {"status": "OPEN", "snapshot": None}, "tasks": {}})
+        phase = phases.setdefault(phase_id, {"status": "in-progress", "tasks": {}})
     else:
         phase = phases.get(phase_id)
         if not isinstance(phase, dict):
@@ -355,6 +355,120 @@ def _clean_gate(path: Path) -> dict[str, Any]:
     return gate
 
 
+def _attempt_changed_project(run_root: Path, attempt: Any) -> bool:
+    """Whether one recorded attempt objectively changed project state."""
+    if not isinstance(attempt, dict) or attempt.get("writes_project") is not True:
+        return False
+    gate_binding = attempt.get("integrity_gate")
+    if not isinstance(gate_binding, dict) or not isinstance(gate_binding.get("path"), str):
+        return False
+    try:
+        gate_path = run_path(run_root, gate_binding["path"])
+        gate = load_json(gate_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    scope = gate.get("scope")
+    return isinstance(scope, dict) and int(scope.get("changed_count") or 0) > 0
+
+
+def _iso_time(raw: Any) -> datetime | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _terminal_scope_changed(run_root: Path, event_dir: Path, reservation: dict[str, Any]) -> tuple[bool, datetime | None]:
+    """Return factual mutation + terminal time from cold immutable attempt evidence.
+
+    New attempts use terminal-bound scope. Historical attempts fall back to an existing
+    integrity gate; if neither can prove no movement, treat a writer as potentially
+    mutating rather than weakening fresh-review provenance.
+    """
+    terminal_path = event_dir / "terminal.json"
+    if not terminal_path.is_file():
+        return bool(reservation.get("writes_project")), None
+    terminal = load_json(terminal_path)
+    ended = _iso_time(terminal.get("process_ended_at") or terminal.get("ended_at"))
+    binding = terminal.get("terminal_scope")
+    if isinstance(binding, dict) and isinstance(binding.get("path"), str):
+        try:
+            diff_path = run_path(run_root, binding["path"])
+            expected_sha = binding.get("sha256")
+            if not isinstance(expected_sha, str) or sha256(diff_path) != expected_sha.lower():
+                return bool(reservation.get("writes_project")), ended
+            data = load_json(diff_path)
+            changed = bool(data.get("changed") or data.get("git_head_changed"))
+            return changed, ended
+        except (OSError, ValueError, json.JSONDecodeError):
+            return bool(reservation.get("writes_project")), ended
+    for gate_path in sorted(event_dir.glob("evidence-gate*.json")):
+        try:
+            gate = load_json(gate_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        scope = gate.get("scope")
+        if isinstance(scope, dict):
+            return bool(int(scope.get("changed_count") or 0) > 0 or scope.get("git_head_changed")), ended
+    return bool(reservation.get("writes_project")), ended
+
+
+def _reservation_matches_contract(run_root: Path, reservation: dict[str, Any], contract: Path, contract_sha: str) -> bool:
+    raw = reservation.get("task_contract")
+    if not isinstance(raw, str) or reservation.get("task_contract_sha256") != contract_sha:
+        return False
+    try:
+        return run_path(run_root, raw) == contract
+    except ValueError:
+        return False
+
+
+def _assert_fresh_reviewer(run_root: Path, contract: Path, source_gate: dict[str, Any]) -> None:
+    if str(source_gate.get("role") or "").lower() != "reviewer":
+        raise ValueError("recorded project mutation requires a fresh Reviewer integrity gate")
+    terminal_raw = source_gate.get("terminal_event")
+    if not isinstance(terminal_raw, str):
+        raise ValueError("Reviewer gate lacks terminal-event provenance")
+    reviewer_event = run_path(run_root, terminal_raw).parent
+    reviewer_reservation_path = reviewer_event / "launch-reservation.json"
+    if not reviewer_reservation_path.is_file():
+        raise ValueError("Reviewer launch reservation missing")
+    reviewer_reservation = load_json(reviewer_reservation_path)
+    reviewer_started = _iso_time(reviewer_reservation.get("reserved_at"))
+    if reviewer_started is None:
+        raise ValueError("Reviewer launch time missing/invalid")
+
+    task_root = contract.parent.parent
+    contract_sha = sha256(contract)
+    attempts_root = task_root / "attempts"
+    if not attempts_root.is_dir():
+        return
+    for reservation_path in attempts_root.glob("*/launch-reservation.json"):
+        event_dir = reservation_path.parent
+        if event_dir == reviewer_event:
+            continue
+        try:
+            reservation = load_json(reservation_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not _reservation_matches_contract(run_root, reservation, contract, contract_sha):
+            continue
+        if reservation.get("writes_project") is not True:
+            continue
+        changed, ended = _terminal_scope_changed(run_root, event_dir, reservation)
+        if not changed:
+            continue
+        if ended is None:
+            raise ValueError(f"project-writing attempt lacks terminal provenance: {event_dir}")
+        if reviewer_started <= ended:
+            raise ValueError(
+                "fresh Reviewer requirement violated: accepted Reviewer predates later project mutation "
+                f"in {event_dir.name}"
+            )
+
+
 def accept_task(args: argparse.Namespace) -> dict[str, Any]:
     """Persist the parent's acceptance; Python validates provenance only."""
     run_root = args.run_root.resolve()
@@ -372,8 +486,38 @@ def accept_task(args: argparse.Namespace) -> dict[str, Any]:
     source_task_raw = source_gate.get("task")
     if not isinstance(source_task_raw, str) or run_path(run_root, source_task_raw) != contract:
         raise ValueError("source gate is not bound to task.current_contract")
-    if allowed_source_changes(contract.read_text(encoding="utf-8", errors="replace")) and str(source_gate.get("role") or "").lower() != "reviewer":
-        raise ValueError("mutating contract acceptance requires a fresh Reviewer integrity gate")
+    source_scope = source_gate.get("scope")
+    source_role = str(source_gate.get("role") or "").lower()
+    source_can_write = source_gate.get("writes_project") is True or source_role in {"implementer", "fixer", "verification"}
+    source_mutated = source_can_write and isinstance(source_scope, dict) and (
+        int(source_scope.get("changed_count") or 0) > 0 or bool(source_scope.get("git_head_changed"))
+    )
+    # Cold attempt evidence, not bounded hot state, proves Reviewer freshness. Only
+    # attempts bound to the current contract revision participate; older revisions stay cold.
+    task_root = contract.parent.parent
+    contract_sha = sha256(contract)
+    project_mutated = source_mutated
+    found_current_contract_attempt = False
+    attempts_root = task_root / "attempts"
+    if attempts_root.is_dir():
+        for reservation_path in attempts_root.glob("*/launch-reservation.json"):
+            try:
+                reservation = load_json(reservation_path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if not _reservation_matches_contract(run_root, reservation, contract, contract_sha):
+                continue
+            found_current_contract_attempt = True
+            if reservation.get("writes_project") is True:
+                changed, _ended = _terminal_scope_changed(run_root, reservation_path.parent, reservation)
+                project_mutated = project_mutated or changed
+    if not found_current_contract_attempt:
+        # Historical/synthetic state may predate self-contained attempt directories.
+        project_mutated = project_mutated or any(
+            _attempt_changed_project(run_root, task.get(key)) for key in ("current_attempt", "last_attempt")
+        )
+    if project_mutated:
+        _assert_fresh_reviewer(run_root, contract, source_gate)
 
     source_report_raw = source_gate.get("report")
     if not isinstance(source_report_raw, str):
@@ -400,6 +544,8 @@ def accept_task(args: argparse.Namespace) -> dict[str, Any]:
         semantic_gate_path = source_gate_path
 
     task["status"] = "accepted"
+    task.pop("current_attempt", None)
+    task.pop("last_attempt", None)
     task["accepted"] = {
         "source_gate": {"path": str(source_gate_path), "sha256": sha256(source_gate_path)},
         "semantic_report": {"path": str(semantic_report), "sha256": sha256(semantic_report)},

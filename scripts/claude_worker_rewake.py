@@ -3,8 +3,9 @@
 
 Installed as a Claude Code PostToolUse:Bash command hook with asyncRewake=true.
 For ordinary Bash calls it exits immediately. When the Bash result is the JSON
-emitted by `run_worker.py --detach`, it waits cheaply on that attempt's
-`terminal.json` and exits 2 with a tiny system reminder. Claude Code's documented
+emitted by the high-level `dsd_attempt.py launch --detach` (or the low-level
+worker launcher), it waits cheaply on that attempt's `terminal.json` and exits 2
+with a tiny system reminder. Claude Code's documented
 asyncRewake behavior then wakes an idle Claude without model-level polling.
 """
 from __future__ import annotations
@@ -40,7 +41,7 @@ def launched_event_path(payload: dict[str, Any]) -> Path | None:
                 value = json.loads(fragment)
             except Exception:
                 continue
-            if not isinstance(value, dict) or value.get("status") != "launched":
+            if not isinstance(value, dict) or value.get("status") not in {"started", "launched"}:
                 continue
             terminal = value.get("terminal_event")
             if isinstance(terminal, str) and terminal.strip():
@@ -98,7 +99,7 @@ def main() -> int:
             print(
                 "DSD external worker reached terminal state.\n"
                 f"Terminal event: {terminal}\n"
-                f"Status: {status}. Read/classify terminal.json and update state once; run the evidence gate only for a successful completed exit, then execute next_action.",
+                f"Status: {status}. Resume from live state and use the high-level DSD gate/wait lifecycle; do not reconstruct the run or manually patch state.",
                 file=sys.stderr,
             )
             # Claude Code asyncRewake wakes the idle model only on exit code 2 and

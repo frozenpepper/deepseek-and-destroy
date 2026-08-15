@@ -63,7 +63,7 @@ Worker reports otherwise remain natural language. No FINAL/verdict/table grammar
 
 Normal role change = fresh session. Durable reports/evidence carry context between roles.
 
-`run_worker.py --resume-session` exists only for trustworthy **same-role** transport/recovery continuation. If exact continuation is uncertain, start a fresh same-role attempt.
+`run_worker.py --resume-session` exists only for trustworthy **same-role** continuation: transport/recovery, or resuming a worker after a `DECISION_REQUIRED` parent decision. Pass the durable decision as exact input. If the decision materially changed task authority/scope/acceptance, bind the new contract revision first; session continuity may still be reused. If exact continuation is uncertain, start a fresh same-role attempt.
 
 ## Provider trouble
 

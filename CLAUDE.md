@@ -28,4 +28,4 @@ python3 <skill>/scripts/dsd_attempt.py wait --run-root <run> --phase-id <phase> 
 
 A host timeout without terminal evidence is a non-event: wait again without model-visible polling/diagnostics.
 
-The same adapter installs Claude compaction hooks. On a fresh session follow `SKILL.md`'s resume fast path; load `COMPACTION.md` only when checkpoint state requires it. Restarting Claude refreshes the skill but does not refresh project-local adapter copies; after upgrading DSD, rerun the idempotent adapter installer once. Claude-native subagent hooks are relevant only when a Claude-native worker backend is explicitly selected.
+The same adapter installs Claude compaction hooks. Its project-local Python files are tiny shims into the installed skill, so a normal skill upgrade does not leave stale copied control-plane code behind. Rerun the installer only if the hook/plugin definition itself changed. On a fresh session follow `SKILL.md`'s resume fast path; load `COMPACTION.md` only when checkpoint state requires it. Claude-native subagent hooks are relevant only when a Claude-native worker backend is explicitly selected.

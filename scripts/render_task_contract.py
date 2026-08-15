@@ -128,7 +128,8 @@ def main() -> int:
 
         authority = existing_paths(array(spec, "authority"), project, "authority")
         inputs = existing_paths(array(spec, "inputs"), project, "input")
-        writes = list(dict.fromkeys(project_prefix(x, "write_path") for x in array(spec, "write_paths")))
+        write_restriction_declared = "write_paths" in spec
+        writes = list(dict.fromkeys(project_prefix(x, "write_path") for x in array(spec, "write_paths"))) if write_restriction_declared else []
         inventory = list(dict.fromkeys(project_prefix(x, "extra_inventory") for x in array(spec, "extra_inventory")))
         acceptance_raw = [clean(x) for x in array(spec, "acceptance") if clean(x)]
         acceptance = [x if re.match(r"AC-\d+\b", x, re.I) else f"AC-{i:03d} — {x}" for i, x in enumerate(acceptance_raw, 1)]
@@ -136,7 +137,8 @@ def main() -> int:
         lines = [f"# Task {task_id} — {clean(spec.get('title') or task_id)}", f"Contract revision: r{revision:04d}", "", "## Objective", clean(spec["objective"]), ""]
         if authority: lines += ["## Authority", *[f"- `{p}`" for p in authority], ""]
         if inputs: lines += ["## Inputs", *[f"- `{p}`" for p in inputs], ""]
-        lines += ["## Allowed source changes", *([f"- `{p}`" for p in writes] if writes else ["NONE"]), ""]
+        if write_restriction_declared:
+            lines += ["## Allowed source changes", *([f"- `{p}`" for p in writes] if writes else ["NONE"]), ""]
         for heading, values in (
             ("Extra scope inventory", inventory), ("Acceptance criteria", acceptance),
             ("Proof obligations", [clean(x) for x in array(spec, "proof_obligations") if clean(x)]),
@@ -148,7 +150,7 @@ def main() -> int:
 
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-        print(json.dumps({"format":"dsd-task-contract-v6","task_id":task_id,"revision":revision,"path":str(output),"sha256":sha256(output),"writes_project":bool(writes)}, sort_keys=True, separators=(",", ":")))
+        print(json.dumps({"format":"dsd-task-contract-v7","task_id":task_id,"revision":revision,"path":str(output),"sha256":sha256(output),"write_restriction":writes if write_restriction_declared else None}, sort_keys=True, separators=(",", ":")))
         return 0
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

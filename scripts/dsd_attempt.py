@@ -164,7 +164,7 @@ def launch(args: argparse.Namespace) -> int:
         run_checked([
             sys.executable, str(scripts / "scope_snapshot.py"), "capture",
             "--root", str(project_root), "--output", str(baseline),
-            "--git-worktree", "--exclude-prefix", "DeepSeekAndDestroy",
+            "--git-dirty", "--exclude-prefix", "DeepSeekAndDestroy",
             "--task-contract", str(contract),
         ])
         run_checked([
@@ -237,6 +237,7 @@ def launch(args: argparse.Namespace) -> int:
             "status": "started" if args.detach else "waiting",
             "attempt": f"{role}-{attempt}",
             "event_dir": str(event_dir),
+            "terminal_event": str(event_dir / "terminal.json"),
         }
         rc = cp.returncode
         if cp.returncode == 0 and not args.detach:
@@ -324,9 +325,18 @@ def gate(args: argparse.Namespace) -> int:
         "--terminal-event", str(terminal), "--log", str(log), "--output", str(output), "--json",
     ]
     cp = subprocess.run(cmd, text=True, capture_output=True, check=False)
-    # Bind the objective gate result into state; no semantic routing is inferred.
+    # Bind the objective gate result into state; describe facts only, never choose the next role.
     if output.is_file():
-        next_action = f"route gated {role} attempt {event_dir}"
+        gate_fact = read_json(output)
+        if gate_fact.get("attempt_output") == "reportless-no-change":
+            disposition = "reportless-no-change"
+        elif gate_fact.get("integrity_ok") is True and gate_fact.get("needs_report_recovery") is True:
+            disposition = "report-recovery"
+        elif gate_fact.get("integrity_ok") is True and gate_fact.get("ready_for_interpretation") is True:
+            disposition = "gated"
+        else:
+            disposition = "integrity-failed"
+        next_action = f"route {disposition} {role} attempt {event_dir}"
         state_cp = subprocess.run([
             sys.executable, str(scripts / "dsd_state.py"), "bind-gate",
             "--run-root", str(run_root), "--phase-id", args.phase_id,
@@ -361,6 +371,8 @@ def gate(args: argparse.Namespace) -> int:
             }
             if gate_data.get("needs_report_recovery") is True:
                 summary["report_recovery"] = True
+            if gate_data.get("attempt_output"):
+                summary["attempt_output"] = gate_data.get("attempt_output")
             if gate_data.get("errors"):
                 summary["errors"] = gate_data.get("errors")
             if args.surface:
@@ -478,7 +490,7 @@ def parser() -> argparse.ArgumentParser:
     l.add_argument("--model", help="override state.worker_runtime.model")
     l.add_argument("--detach", action="store_true")
     l.add_argument("--wait-kind")
-    l.add_argument("--resume-session", help="same-role continuation only")
+    l.add_argument("--resume-session", help="trustworthy same-role continuation: transport/recovery or post-DECISION_REQUIRED resume")
     l.add_argument("--auto-flag", default="--auto", help="OpenCode permission flag; pass empty string to omit")
     l.add_argument("--input", action="append", default=[], help="additional exact run artifact input supplied to this worker")
     l.add_argument("--force-read-only", action="store_true", help="reserve attempt as project-read-only regardless of task write scope")

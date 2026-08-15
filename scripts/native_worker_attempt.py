@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from _contract import validate_role_contract
 from _roles import ROLE_NAMES
 from _rules_snapshot import sha256_file, verify_snapshot
-from run_worker import atomic_json, freeze_scope_at_terminal, now, reserve_attempt
+from run_worker import atomic_json, bind_report_at_terminal, freeze_scope_at_terminal, now, reserve_attempt
 
 
 def absolute(path: Path, label: str) -> Path:
@@ -131,6 +131,10 @@ def finalize(args: argparse.Namespace) -> int:
         if ancestor.name == "DeepSeekAndDestroy":
             project_root = ancestor.parent.resolve()
             break
+    terminal_report, report_error = bind_report_at_terminal({
+        "event_dir": event_dir,
+        "report": Path(reservation["report"]).resolve(),
+    })
     frozen_scope = None
     scope_error = None
     if project_root is None:
@@ -162,6 +166,8 @@ def finalize(args: argparse.Namespace) -> int:
         "started_at": attempt.get("started_at"),
         "process_ended_at": process_ended_at,
         "ended_at": now(),
+        "terminal_report": terminal_report,
+        "terminal_report_error": report_error,
         "terminal_scope": frozen_scope,
         "terminal_scope_error": scope_error,
     }

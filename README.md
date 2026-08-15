@@ -56,7 +56,7 @@ Every project mutation still requires fresh independent Reviewer provenance befo
 
 The always-relevant parent doctrine is `SKILL.md`. Detailed material is cold-loaded only when needed:
 
-- `WORKSPACE.md` — state, evidence, recovery, concurrency, barriers;
+- `WORKSPACE.md` — state, evidence, recovery, concurrency;
 - `CODEX.md`, `CLAUDE.md`, `KILO.md` — parent harness adapters;
 - `OPENCODE.md` — external worker transport/recovery;
 - `COMPACTION.md` — checkpoint/resume;
@@ -130,11 +130,11 @@ DSD deliberately retains deterministic mechanisms for facts where they are stron
 - exact attempt reservation and real terminal lifecycle;
 - content-based changed-path baselines;
 - read-only-role write violations;
-- writer changes outside exact allowed paths;
+- violations of an explicit authority-supplied write restriction;
 - declared Git-ignored/load-bearing trees;
 - reportless/suspect-change Recovery;
 - external OpenCode DB isolation outside the repository;
-- phase write barrier / frozen phase evidence;
+- frozen phase evidence with fresh final Verification/Audit;
 - governing-authority continuity across compaction/resume;
 - fresh Reviewer provenance after mutation.
 
@@ -144,10 +144,10 @@ A clean integrity gate means **safe to interpret**, not “the engineering passe
 
 - **Phase Surveyor** — measured current state before decomposition.
 - **Discovery** — traces one unfamiliar subsystem and writes a durable construction brief.
-- **Implementer** — builds one bounded change.
+- **Implementer** — builds one bounded change and discovers its necessary implementation surface.
 - **Fixer** — repairs explicit supplied findings.
 - **Reviewer** — fresh adversarial read-only review.
-- **Verification** — establishes one technical predicate; it may write only exact generated/project paths explicitly authorized by the contract.
+- **Verification** — establishes one technical predicate; it is read-only unless the contract explicitly grants generated/project writes.
 - **Recovery** — read-only forensic disposition of suspect interrupted changes.
 - **Phase Auditor** — fresh whole-phase audit against a frozen phase state.
 - **Evidence Clerk** — read-only interpretation/reconciliation/compression of existing evidence.
@@ -160,13 +160,13 @@ After task work finishes:
 
 ```text
 finish all phase writers
-→ close/freeze phase barrier
-→ required read-only post-barrier verification
+→ freeze the intended final phase state
+→ required fresh read-only Verification
 → fresh Phase Auditor
 → premium parent phase decision
 ```
 
-Any later phase mutation invalidates the frozen evidence and reopens the barrier.
+Any later phase mutation invalidates that phase evidence and requires fresh Verification/Audit.
 
 ## Waiting and failure recovery
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Validate objective DSD run-state invariants.
 
-This checker validates durable bindings, lifecycle facts, phase-writer safety, and
-resume/turn-exit consistency. It does not infer engineering meaning, task verdicts,
+This checker validates durable bindings, lifecycle facts, and resume/turn-exit consistency. It does not infer engineering meaning, task verdicts,
 or orchestration strategy from prose/state hints.
 """
 from __future__ import annotations
@@ -225,25 +224,6 @@ def validate_task(base: Path, task_id: str, task: dict[str, Any], errors: list[s
             validate_binding(base, f"{task_id}.accepted.semantic_gate", accepted.get("semantic_gate"), errors)
 
 
-def attempt_writes_project(base: Path, task: dict[str, Any]) -> bool:
-    attempt = task.get("current_attempt")
-    if not isinstance(attempt, dict):
-        return False
-    if isinstance(attempt.get("writes_project"), bool):
-        return bool(attempt.get("writes_project"))
-    event_dir = resolve(base, attempt.get("event_dir"))
-    if event_dir is not None:
-        reservation = event_dir / "launch-reservation.json"
-        if reservation.is_file():
-            try:
-                data = json.loads(reservation.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and isinstance(data.get("writes_project"), bool):
-                    return bool(data["writes_project"])
-            except Exception:
-                return True  # fail safe while closing a phase writer barrier
-    return False
-
-
 def validate_checkpoint(base: Path, state: dict[str, Any], errors: list[str]) -> str:
     checkpoint = state.get("context_checkpoint") or {}
     status = str(checkpoint.get("status", "none")).lower()
@@ -288,18 +268,10 @@ def main() -> int:
     for phase_id, phase in (state.get("phases") or {}).items():
         if not isinstance(phase, dict):
             continue
-        barrier = phase.get("gate_barrier") or {}
-        barrier_status = str(barrier.get("status", "OPEN")).upper()
-        if barrier_status not in {"OPEN", "CLOSED"}:
-            errors.append(f"{phase_id}: gate_barrier.status must be OPEN or CLOSED")
-        if barrier_status == "CLOSED" and existing(base, barrier.get("snapshot")) is None:
-            errors.append(f"{phase_id}: CLOSED gate_barrier requires snapshot")
         for task_name, task in (phase.get("tasks") or {}).items():
             if not isinstance(task, dict):
                 continue
             full = f"{phase_id}/{task_name}"
-            if barrier_status == "CLOSED" and str(task.get("status", "")).lower() in ACTIVE_ATTEMPT and attempt_writes_project(base, task):
-                errors.append(f"{full}: CLOSED phase barrier cannot coexist with an active project writer")
             validate_task(base, full, task, errors)
             attempt = task.get("current_attempt") or {}
             if str(task.get("status", "")).lower() == "in-progress" and isinstance(attempt, dict):
@@ -307,12 +279,7 @@ def main() -> int:
                 if pid_alive(pid) or attempt.get("session_id") or attempt.get("harness_run_id"):
                     any_live = True
 
-    availability = state.get("worker_availability") or {}
-    if availability.get("status") == "waiting-for-worker" and not availability.get("next_probe_at"):
-        errors.append("worker_availability waiting-for-worker requires next_probe_at")
-
     if args.for_turn_exit and run_status not in TERMINAL_RUN:
-        waiting = availability.get("status") == "waiting-for-worker" and bool(availability.get("next_probe_at"))
         compacting = checkpoint_status == "compacting"
         host_wait = state.get("orchestrator_wait") or {}
         active_wait = bool(host_wait.get("active"))
@@ -328,7 +295,7 @@ def main() -> int:
             if monitor is not None and not pid_alive(monitor):
                 errors.append("orchestrator_wait monitor is not alive")
                 active_wait = False
-        if not (any_live or waiting or compacting or active_wait):
+        if not (any_live or compacting or active_wait):
             errors.append("turn-exit invariant failed: no live worker, active wait/backoff, or compaction")
         if checkpoint_status in {"prepared", "rehydration-required"}:
             errors.append(f"turn-exit invariant failed: checkpoint is {checkpoint_status}")

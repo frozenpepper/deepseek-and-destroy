@@ -53,6 +53,6 @@ Keep only context not already represented durably elsewhere: user/mission constr
 
 If native compaction fails, preserve the prepared checkpoint; retry once when sensible or start a fresh parent session from it. A fresh session from a verified checkpoint is a valid continuation.
 
-Hooks must not guess among multiple active runs. Use exact `DSD_RUN_ROOT`/session binding; if several candidates remain, require an explicit run root rather than mutating the wrong run.
+Run selection prefers exact `DSD_RUN_ROOT`, then exact session binding, then one unambiguous run owned by the current parent harness. If ambiguity remains, the hook must not mutate any run and must not block native compaction; warn and continue.
 
 HANDOVER prose restores continuity, not technical truth. When a resumed consequential decision depends on a technical claim, follow its accepted/governing evidence or delegate the predicate again.

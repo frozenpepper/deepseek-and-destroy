@@ -16,7 +16,7 @@ import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from _contract import allowed_source_changes, role_writes_project
+from _contract import allowed_source_changes, has_explicit_write_restriction, role_writes_project
 from _roles import ROLE_NAMES
 from _rules_snapshot import sha256_file, verify_snapshot
 
@@ -328,16 +328,45 @@ def main() -> int:
         writes_project = role_writes_project(args.role, task_text)
         warnings.append("historical attempt lacks writes_project reservation; capability derived from role + contract")
     try:
-        allowed_writes = allowed_source_changes(task_text) if writes_project else []
+        write_restriction_declared = has_explicit_write_restriction(task_text)
+        allowed_writes = allowed_source_changes(task_text) if write_restriction_declared else []
     except ValueError as exc:
-        errors.append(str(exc)); allowed_writes = []
+        errors.append(str(exc)); write_restriction_declared = False; allowed_writes = []
 
     report_state = "missing"
     report_sha: str | None = None
-    if report.is_file():
-        report_sha = sha256_file(report)
-        skeleton_sha = reservation.get("report_skeleton_sha256") if reservation else None
-        report_state = "launcher-skeleton" if isinstance(skeleton_sha, str) and report_sha == skeleton_sha.lower() else "present"
+    terminal_report = terminal.get("terminal_report") if terminal else None
+    if isinstance(terminal_report, dict):
+        raw = terminal_report.get("path")
+        digest = terminal_report.get("sha256")
+        bound_state = terminal_report.get("state")
+        if not isinstance(raw, str) or resolve_run_binding(run_root, raw) != report:
+            errors.append("terminal report binding does not match reserved report path")
+        elif bound_state not in {"present", "launcher-skeleton", "missing"}:
+            errors.append("terminal report binding has invalid state")
+        else:
+            report_state = str(bound_state)
+            report_sha = digest if isinstance(digest, str) else None
+            if report_state == "missing":
+                if report.exists():
+                    errors.append("report appeared after terminal lifecycle binding")
+            else:
+                if not report.is_file():
+                    errors.append("terminal-bound report is missing")
+                elif not isinstance(report_sha, str) or len(report_sha) != 64:
+                    errors.append("terminal report sha256 missing/invalid")
+                elif sha256_file(report) != report_sha.lower():
+                    errors.append("terminal-bound report changed after worker exit")
+    else:
+        report_error = terminal.get("terminal_report_error") if terminal else None
+        if isinstance(report_error, str) and report_error.strip():
+            errors.append(f"terminal report binding failed: {report_error.strip()}")
+        else:
+            warnings.append("historical attempt lacks terminal-bound report; report bytes are observed at gate time")
+            if report.is_file():
+                report_sha = sha256_file(report)
+                skeleton_sha = reservation.get("report_skeleton_sha256") if reservation else None
+                report_state = "launcher-skeleton" if isinstance(skeleton_sha, str) and report_sha == skeleton_sha.lower() else "present"
 
     scope_diff: Path | None = None
     scope_summary: dict[str, Any] = {}
@@ -350,8 +379,8 @@ def main() -> int:
     else:
         try:
             baseline_data = json.loads(baseline.read_text(encoding="utf-8"))
-            if baseline_data.get("inventory_mode") != "git-worktree":
-                errors.append("SCOPE-BASELINE-UNSAFE: terminal gate requires git-worktree inventory")
+            if baseline_data.get("inventory_mode") not in {"git-dirty", "git-worktree"}:
+                errors.append("SCOPE-BASELINE-UNSAFE: terminal gate requires compact Git scope inventory")
             exclusions = [str(x).strip("/") for x in baseline_data.get("exclude_prefixes", [])]
             if exclusions != ["DeepSeekAndDestroy"]:
                 errors.append("SCOPE-BASELINE-UNSAFE: only DeepSeekAndDestroy may be excluded")
@@ -364,7 +393,7 @@ def main() -> int:
             errors.extend(scope_errors)
             warnings.extend(scope_warnings)
             if scope_result:
-                if scope_result.get("format") != "deepseek-and-destroy-scope-comparison-v4":
+                if scope_result.get("format") not in {"deepseek-and-destroy-scope-comparison-v4", "deepseek-and-destroy-scope-comparison-v5"}:
                     errors.append(f"unsupported frozen scope format: {scope_result.get('format')!r}")
                 if str(scope_result.get("project_root") or "") != str(project_root):
                     errors.append("frozen scope project_root mismatch")
@@ -372,16 +401,21 @@ def main() -> int:
                     errors.append("frozen scope does not bind the reserved baseline capture")
                 changed = scope_result.get("changed", []) if isinstance(scope_result, dict) else []
                 changed_paths = [str(x.get("path", "")) for x in changed if isinstance(x, dict) and x.get("path")]
-                outside = [p for p in changed_paths if writes_project and not path_allowed(p, allowed_writes)]
+                outside = [
+                    p for p in changed_paths
+                    if writes_project and write_restriction_declared and not path_allowed(p, allowed_writes)
+                ]
                 if outside:
-                    errors.append(f"SCOPE-DRIFT: {len(outside)} path(s) outside Allowed source changes: " + ", ".join(outside[:12]))
-                if not writes_project and changed_paths:
-                    errors.append(f"READONLY-SCOPE-MOVED: {len(changed_paths)} project path(s)")
+                    errors.append(f"WRITE-RESTRICTION: {len(outside)} path(s) outside explicit Allowed source changes: " + ", ".join(outside[:12]))
+                head_changed = bool(scope_result.get("git_head_changed"))
+                if not writes_project and (changed_paths or head_changed):
+                    errors.append(f"READONLY-SCOPE-MOVED: {len(changed_paths)} project path(s)" + (" plus Git HEAD" if head_changed else ""))
                 scope_summary = {
                     "baseline": str(baseline),
                     "diff": str(scope_diff) if scope_diff else None,
                     "diff_sha256": sha256_file(scope_diff) if scope_diff and scope_diff.is_file() else None,
                     "changed_count": len(changed_paths),
+                    "git_head_changed": head_changed,
                     "added_count": len(scope_result.get("added", [])),
                     "removed_count": len(scope_result.get("removed", [])),
                     "modified_count": len(scope_result.get("modified", [])),
@@ -392,6 +426,16 @@ def main() -> int:
 
     ready = not errors and report_state == "present"
     needs_report_recovery = not errors and report_state != "present"
+    attempt_output: str | None = None
+    if (
+        terminal.get("status") == "completed"
+        and terminal.get("exit_code") == 0
+        and report_state != "present"
+        and scope_summary.get("changed_count") == 0
+        and not scope_summary.get("git_head_changed")
+    ):
+        # Objective description only. Do not infer why the worker produced no report/change.
+        attempt_output = "reportless-no-change"
     reservation_path = terminal.get("launch_reservation") if terminal else None
     reservation_sha = terminal.get("launch_reservation_sha256") if terminal else None
 
@@ -402,6 +446,7 @@ def main() -> int:
         "needs_report_recovery": needs_report_recovery,
         "role": args.role,
         "writes_project": writes_project,
+        "write_restriction_declared": write_restriction_declared,
         "allowed_source_changes": allowed_writes,
         "task": str(task),
         "task_sha256": sha256_file(task) if task.is_file() else None,
@@ -417,6 +462,8 @@ def main() -> int:
         "errors": errors,
         "warnings": warnings,
     }
+    if attempt_output is not None:
+        result["attempt_output"] = attempt_output
 
     rendered = json.dumps(result, indent=2, sort_keys=True)
     if args.output:

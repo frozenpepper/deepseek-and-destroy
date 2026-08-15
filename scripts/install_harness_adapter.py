@@ -87,15 +87,31 @@ def install_hook_fragment(path: Path, fragment_path: Path) -> tuple[bool, Path |
     return changed, backup_path
 
 
+def write_skill_shim(destination: Path, target: Path) -> None:
+    """Write a tiny project-local hook shim that always executes the installed skill."""
+    scripts = target.parent.resolve()
+    body = (
+        "#!/usr/bin/env python3\n"
+        "import runpy, sys\n"
+        f"SCRIPTS = {str(scripts)!r}\n"
+        "sys.path.insert(0, SCRIPTS)\n"
+        f"runpy.run_path({str(target.resolve())!r}, run_name='__main__')\n"
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(body, encoding="utf-8")
+    destination.chmod(0o755)
+
+
 def install_helper(skill_root: Path, project_root: Path) -> Path:
     tools = project_root / "DeepSeekAndDestroy" / "tools"
     tools.mkdir(parents=True, exist_ok=True)
-    for name in ("context_checkpoint.py", "check_state.py", "dsd_state.py", "_contract.py", "_rules_snapshot.py", "_roles.py"):
-        source = skill_root / "scripts" / name
-        destination = tools / name
-        shutil.copy2(source, destination)
-        destination.chmod(0o755)
-    return tools / "context_checkpoint.py"
+    target = tools / "context_checkpoint.py"
+    write_skill_shim(target, skill_root / "scripts" / "context_checkpoint.py")
+    # Remove legacy copied control-plane modules. Immutable run evidence remains in runs/;
+    # project hooks need only the stable shim above.
+    for name in ("check_state.py", "dsd_state.py", "_contract.py", "_rules_snapshot.py", "_roles.py"):
+        (tools / name).unlink(missing_ok=True)
+    return target
 
 
 def install_codex(project_root: Path, skill_root: Path) -> dict[str, Any]:
@@ -113,11 +129,8 @@ def install_codex(project_root: Path, skill_root: Path) -> dict[str, Any]:
 def install_claude(project_root: Path, skill_root: Path) -> dict[str, Any]:
     path = project_root / ".claude" / "settings.json"
     changed, backup_path = install_hook_fragment(path, skill_root / "adapters" / "claude" / "settings.fragment.json")
-    rewake_source = skill_root / "scripts" / "claude_worker_rewake.py"
     rewake_target = project_root / "DeepSeekAndDestroy" / "tools" / "claude_worker_rewake.py"
-    rewake_target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(rewake_source, rewake_target)
-    rewake_target.chmod(0o755)
+    write_skill_shim(rewake_target, skill_root / "scripts" / "claude_worker_rewake.py")
     return {
         "harness": "claude-code",
         "config": str(path),

@@ -90,7 +90,26 @@ def active_state_paths(project_root: Path) -> list[Path]:
     return sorted(candidates)
 
 
-def choose_run(project_root: Path, explicit: str | None, session_id: str | None, *, prefer_checkpoint: bool = False) -> tuple[Path, dict[str, Any]]:
+def normalize_harness(value: Any) -> str:
+    raw = str(value or "").strip().lower().replace("_", "-")
+    aliases = {
+        "claude": "claude-code", "claude-code": "claude-code",
+        "codex": "codex", "opencode": "opencode", "opencode-cli": "opencode",
+        "kilo": "kilo", "kilocode": "kilo",
+    }
+    return aliases.get(raw, raw)
+
+
+def orchestrator_harness(state: dict[str, Any]) -> str:
+    orchestrator = state.get("orchestrator") if isinstance(state.get("orchestrator"), dict) else {}
+    return normalize_harness(
+        orchestrator.get("harness")
+        or state.get("orchestrator_harness")
+        or state.get("parent_harness")
+    )
+
+
+def choose_run(project_root: Path, explicit: str | None, session_id: str | None, *, prefer_checkpoint: bool = False, harness: str | None = None) -> tuple[Path, dict[str, Any]]:
     requested = explicit or os.environ.get("DSD_RUN_ROOT")
     if requested:
         run_root = Path(requested)
@@ -114,6 +133,18 @@ def choose_run(project_root: Path, explicit: str | None, session_id: str | None,
                 str((state.get("orchestrator") or {}).get("session_id", "")),
             }
             if session_id in known:
+                matching.append(path)
+        if len(matching) == 1:
+            return matching[0].parent, read_json(matching[0])
+    wanted_harness = normalize_harness(harness)
+    if wanted_harness and len(paths) > 1:
+        matching: list[Path] = []
+        for path in paths:
+            try:
+                state = read_json(path)
+            except Exception:
+                continue
+            if orchestrator_harness(state) == wanted_harness:
                 matching.append(path)
         if len(matching) == 1:
             return matching[0].parent, read_json(matching[0])
@@ -190,7 +221,7 @@ def prepare(
     session_id: str | None,
     context_percent: float | None,
 ) -> dict[str, Any]:
-    run_root, state = choose_run(project_root, run_root_arg, session_id)
+    run_root, state = choose_run(project_root, run_root_arg, session_id, harness=harness)
     existing_checkpoint = state.get("context_checkpoint") or {}
     existing_status = str(existing_checkpoint.get("status", "")).lower()
     existing_path = resolve_path(existing_checkpoint.get("checkpoint_path"), project_root)
@@ -332,8 +363,8 @@ def set_checkpoint_status(run_root: Path, status: str, **extra: Any) -> None:
     write_json(state_path, state)
 
 
-def rehydrate_text(project_root: Path, run_root_arg: str | None, session_id: str | None, *, mark_required: bool = True) -> str:
-    run_root, state = choose_run(project_root, run_root_arg, session_id, prefer_checkpoint=True)
+def rehydrate_text(project_root: Path, run_root_arg: str | None, session_id: str | None, harness: str | None = None, *, mark_required: bool = True) -> str:
+    run_root, state = choose_run(project_root, run_root_arg, session_id, prefer_checkpoint=True, harness=harness)
     sequence, checkpoint_md, manifest_path = latest_checkpoint(run_root)
     checkpoint = state.get("context_checkpoint") or {}
     if mark_required:
@@ -470,7 +501,7 @@ def hook(args: argparse.Namespace) -> int:
             set_checkpoint_status(Path(result["run_root"]), "compacting", compacting_at=utc_now())
             hook_response(args.harness, args.event, f"DSD checkpoint prepared: {result['checkpoint']}")
         elif args.event == "postcompact":
-            run_root, _ = choose_run(project_root, args.run_root, session_id)
+            run_root, _ = choose_run(project_root, args.run_root, session_id, harness=args.harness)
             sequence, _, manifest_path = latest_checkpoint(run_root)
             summary = payload.get("compact_summary")
             if isinstance(summary, str):
@@ -482,7 +513,7 @@ def hook(args: argparse.Namespace) -> int:
             if source and source not in {"compact", "resume"}:
                 hook_response(args.harness, args.event, "")
             else:
-                text = rehydrate_text(project_root, args.run_root, session_id)
+                text = rehydrate_text(project_root, args.run_root, session_id, args.harness)
                 hook_response(args.harness, args.event, text)
         else:
             raise RuntimeError(f"Unsupported hook event: {args.event}")
@@ -490,16 +521,10 @@ def hook(args: argparse.Namespace) -> int:
         # Project-local hooks may exist when no DSD run is active. They must be a no-op.
         hook_response(args.harness, args.event, "")
     except AmbiguousRun as exc:
-        message = f"DeepSeek and Destroy run selection is ambiguous: {exc}"
-        if args.event == "precompact":
-            hook_response(args.harness, args.event, block=message)
-        else:
-            hook_response(args.harness, args.event, message)
+        message = f"DSD checkpoint skipped: run selection is ambiguous ({exc}). Native compaction may proceed; live state remains authoritative. Set DSD_RUN_ROOT only when you actually need to disambiguate the run."
+        hook_response(args.harness, args.event, message)
     except Exception as exc:
-        message = f"DeepSeek and Destroy checkpoint hook failed: {exc}"
-        if args.event == "precompact":
-            hook_response(args.harness, args.event, block=message)
-            return 0
+        message = f"DSD checkpoint hook could not prepare continuity ({exc}). Native compaction may proceed; resume from live DSD state."
         hook_response(args.harness, args.event, message)
     return 0
 

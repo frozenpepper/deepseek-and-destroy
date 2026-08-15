@@ -21,7 +21,6 @@ Typical spec:
   "objective": "Persist canonical media selection across a real restart.",
   "authority": ["docs/architecture.md"],
   "inputs": ["DeepSeekAndDestroy/.../discovery.md"],
-  "write_paths": ["src/media", "tests/media"],
   "extra_inventory": [".runtime/media"],
   "acceptance": [
     "selected media survives a fresh-process restart",
@@ -32,13 +31,13 @@ Typical spec:
 }
 ```
 
-Keep only task-specific **deltas**. Point `authority` at readable plan/ADR/source or a recorded major decision (for example `D-039`) instead of copying it into `objective`. Empty optional fields may be omitted. `write_paths` is explicit because it is a mechanical project-write boundary; an empty/missing list means no project writes. `extra_inventory` names ignored but load-bearing project roots whose movement must be tracked mechanically.
+Keep only task-specific **deltas**. Point `authority` at readable plan/ADR/source or a recorded major decision (for example `D-039`) instead of copying it into `objective`. Empty optional fields may be omitted. Implementer/Fixer normally discover their own implementation files. Add `write_paths` only when authority already says the task is confined to specific files/directories; presence makes that boundary mechanically hard, and an explicit empty list means no project writes. `extra_inventory` is likewise optional for already-known ignored/load-bearing roots.
 
 Acceptance/proof text guides capable workers and reviewers; Python does not parse it to judge engineering success. `AC-*` labels are optional readability aids and are assigned automatically when absent.
 
 There is no task-level `Evidence Clerk Checks` field. Clerk is chosen on demand at a semantic consumption boundary, not recursively encoded in the technical task.
 
-A contract revision becomes immutable at first launch. Material changes to semantic authority/scope/acceptance create a new numbered revision.
+A contract revision becomes immutable at first launch. A mid-task parent decision that merely resolves an ambiguity within the existing task can be recorded durably and passed back as exact input when resuming the same role/session. Material changes to semantic authority/scope/acceptance still create a new numbered revision.
 
 ## Worker-rules snapshot
 

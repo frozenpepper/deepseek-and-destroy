@@ -97,6 +97,35 @@ class SemanticBoundaryTest(unittest.TestCase):
             self.assertEqual(cp.returncode,1,cp.stdout+cp.stderr)
             self.assertTrue(any('READONLY-SCOPE-MOVED' in x for x in json.loads(cp.stdout)['errors']))
 
+
+    def test_implementer_without_write_restriction_owns_discovered_surface(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td); project=self.init_git(root); run=project/'DeepSeekAndDestroy'/'run'; run.mkdir(parents=True)
+            task=run/'task.md'; task.write_text('# Task\n\n## Objective\nRepair the implementation.\n')
+            report=run/'impl.md'; report.write_text('Changed the file required by the implementation.\n')
+            baseline=self.baseline(project,run); terminal=self.terminal_v2(run,task,report,baseline,'implementer')
+            (project/'source.py').write_text('VALUE = 2\n')
+            cp=self.run_cmd([PYTHON,str(ROOT/'scripts'/'evidence_gate.py'),'--run-root',str(run.resolve()),'--task',str(task.resolve()),'--report',str(report.resolve()),'--role','implementer','--project-root',str(project.resolve()),'--scope-baseline',str(baseline.resolve()),'--terminal-event',str(terminal.resolve()),'--json'])
+            self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
+            data=json.loads(cp.stdout)
+            self.assertTrue(data['writes_project']); self.assertFalse(data['write_restriction_declared'])
+            self.assertEqual(data['scope']['changed_count'],1); self.assertEqual(data['errors'],[])
+
+    def test_explicit_write_restriction_remains_hard_when_authority_supplies_it(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td); project=self.init_git(root); (project/'other.py').write_text('OTHER = 1\n')
+            self.run_cmd(['git','add','other.py'],cwd=project); self.run_cmd(['git','commit','-m','other'],cwd=project)
+            run=project/'DeepSeekAndDestroy'/'run'; run.mkdir(parents=True)
+            task=run/'task.md'; task.write_text('# Task\n## Allowed source changes\n- `source.py`\n')
+            report=run/'impl.md'; report.write_text('Implementation complete.\n')
+            baseline=self.baseline(project,run); terminal=self.terminal_v2(run,task,report,baseline,'implementer')
+            (project/'other.py').write_text('OTHER = 2\n')
+            cp=self.run_cmd([PYTHON,str(ROOT/'scripts'/'evidence_gate.py'),'--run-root',str(run.resolve()),'--task',str(task.resolve()),'--report',str(report.resolve()),'--role','implementer','--project-root',str(project.resolve()),'--scope-baseline',str(baseline.resolve()),'--terminal-event',str(terminal.resolve()),'--json'])
+            self.assertEqual(cp.returncode,1,cp.stdout+cp.stderr)
+            data=json.loads(cp.stdout)
+            self.assertTrue(data['write_restriction_declared'])
+            self.assertTrue(any('WRITE-RESTRICTION' in x for x in data['errors']))
+
     def test_contract_renderer_assigns_ids_and_rejects_retired_clerk_field(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); project=root/'project'; project.mkdir(); run=project/'DeepSeekAndDestroy'/'run'; run.mkdir(parents=True)
@@ -104,12 +133,13 @@ class SemanticBoundaryTest(unittest.TestCase):
             data={
                 'run_root':str(run.resolve()),'task_id':'U1','revision':1,'title':'Natural contract','objective':'Do the thing.',
                 'output':str(out.resolve()),'acceptance':['the result survives restart','AC-009 — invalid input fails closed'],
-                'write_paths':[],
             }
             spec.write_text(json.dumps(data))
             cp=self.run_cmd([PYTHON,str(ROOT/'scripts'/'render_task_contract.py'),'--spec',str(spec)])
             self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
+            rendered=json.loads(cp.stdout)
             text=out.read_text(); self.assertIn('AC-001 — the result survives restart',text); self.assertIn('AC-009 — invalid input fails closed',text)
+            self.assertNotIn('Allowed source changes',text); self.assertIsNone(rendered['write_restriction'])
             self.assertNotIn('Evidence Clerk Checks', text)
             data['clerk_checks']=['legacy footgun']; spec.write_text(json.dumps(data))
             cp=self.run_cmd([PYTHON,str(ROOT/'scripts'/'render_task_contract.py'),'--spec',str(spec)])
@@ -120,7 +150,7 @@ class SemanticBoundaryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); run=root/'DeepSeekAndDestroy'/'run'; run.mkdir(parents=True)
             contract=run/'task.md'; contract.write_text('# Task\nContract revision: r0001\n\n## Allowed source changes\nNONE\n')
-            state={'execution_status':'active','next_action':'decide','phases':{'p1':{'status':'in-progress','gate_barrier':{'status':'OPEN','snapshot':None},'tasks':{'U1':{
+            state={'execution_status':'active','next_action':'decide','phases':{'p1':{'status':'in-progress','tasks':{'U1':{
                 'status':'process-exited','current_contract':{'revision':1,'path':str(contract.resolve()),'sha256':hashlib.sha256(contract.read_bytes()).hexdigest()}
             }}}}}
             (run/'state.json').write_text(json.dumps(state))
@@ -192,9 +222,13 @@ class SemanticBoundaryTest(unittest.TestCase):
                 'format':'dsd-integrity-gate-v1','integrity_ok':True,'ok':True,'ready_for_interpretation':True,'errors':[],
                 'role':'evidence-clerk','task':str(contract.resolve()),'report':str(clerk.resolve()),'report_sha256':hashlib.sha256(clerk.read_bytes()).hexdigest(),
             }))
-            state={'execution_status':'active','next_action':'decide','phases':{'p1':{'status':'in-progress','gate_barrier':{'status':'OPEN','snapshot':None},'tasks':{'U1':{
-                'status':'process-exited',
+            gate_data=json.loads(gate.read_text())
+            gate_data['scope']={'changed_count':1}
+            gate.write_text(json.dumps(gate_data))
+            state={'execution_status':'active','next_action':'decide','phases':{'p1':{'status':'in-progress','tasks':{'U1':{
+                'status':'gated',
                 'current_contract':{'revision':1,'path':str(contract.resolve()),'sha256':hashlib.sha256(contract.read_bytes()).hexdigest()},
+                'current_attempt':{'role':'implementer','attempt':1,'writes_project':True,'integrity_gate':{'path':str(gate.resolve()),'sha256':hashlib.sha256(gate.read_bytes()).hexdigest()}},
             }}}}}
             (run/'state.json').write_text(json.dumps(state))
             cp=self.run_cmd([PYTHON,str(ROOT/'scripts'/'dsd_state.py'),'accept-task','--run-root',str(run.resolve()),'--phase-id','p1','--task-id','U1','--evidence-gate',str(gate.resolve()),'--semantic-evidence',str(clerk.resolve()),'--semantic-evidence-gate',str(clerk_gate.resolve())])

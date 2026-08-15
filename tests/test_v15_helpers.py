@@ -293,6 +293,8 @@ raise SystemExit(2)
             self.assertNotIn("task_contract_sha256", terminal)
             self.assertEqual(terminal["status"], "completed")
             self.assertEqual(terminal["session_id"], "ses_fake")
+            self.assertEqual(terminal["terminal_report"]["state"], "launcher-skeleton")
+            self.assertEqual(terminal["terminal_report"]["sha256"], hashlib.sha256(report.read_bytes()).hexdigest())
             self.assertIn("fake worker output", log.read_text())
             self.assertIn("DSD_WORKER_REPORT_PLACEHOLDER_V1", report.read_text())
 
@@ -311,7 +313,7 @@ raise SystemExit(2)
                 "execution_status": "active", "next_action": "re-scope U1",
                 "worker_rules": worker_rules, "worker_runtime": {"harness": "opencode-cli"},
                 "context_checkpoint": {"status": "none"},
-                "phases": {"p1": {"status": "in-progress", "gate_barrier": {"status": "OPEN"}, "tasks": {
+                "phases": {"p1": {"status": "in-progress", "tasks": {
                     "U1": {"status": "prepared", "zero_intended_change_streak": 99,
                            "decomposition_required": True, "next_role": "fixer"}
                 }}},
@@ -488,10 +490,13 @@ raise SystemExit(2)
             ]
             self.assertEqual(len(handlers), 1)
             self.assertTrue(handlers[0].get("asyncRewake"))
-            self.assertTrue((project / "DeepSeekAndDestroy" / "tools" / "claude_worker_rewake.py").exists())
-            self.assertTrue((project / "DeepSeekAndDestroy" / "tools" / "_rules_snapshot.py").exists())
-            copied_check = project / "DeepSeekAndDestroy" / "tools" / "check_state.py"
-            imported = self.run_cmd([PYTHON, str(copied_check), "--help"])
+            tools = project / "DeepSeekAndDestroy" / "tools"
+            self.assertTrue((tools / "claude_worker_rewake.py").exists())
+            self.assertTrue((tools / "context_checkpoint.py").exists())
+            self.assertIn(str((ROOT / "scripts").resolve()), (tools / "claude_worker_rewake.py").read_text())
+            for stale in ("check_state.py", "dsd_state.py", "_rules_snapshot.py", "_roles.py", "_contract.py"):
+                self.assertFalse((tools / stale).exists())
+            imported = self.run_cmd([PYTHON, str(tools / "context_checkpoint.py"), "--help"])
             self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)
             # Idempotence: installing again must not duplicate the hook.
             again = self.run_cmd([
@@ -603,6 +608,8 @@ raise SystemExit(2)
             self.assertEqual(finalize.returncode, 0, finalize.stdout + finalize.stderr)
             terminal = json.loads((event / "terminal.json").read_text())
             self.assertIsNone(terminal["terminal_scope_error"])
+            self.assertEqual(terminal["terminal_report"]["state"], "launcher-skeleton")
+            self.assertEqual(terminal["terminal_report"]["sha256"], hashlib.sha256(report.read_bytes()).hexdigest())
             frozen = Path(terminal["terminal_scope"]["path"])
             self.assertTrue(frozen.is_file())
             self.assertEqual(hashlib.sha256(frozen.read_bytes()).hexdigest(), terminal["terminal_scope"]["sha256"])
@@ -614,7 +621,7 @@ raise SystemExit(2)
             state = {"execution_status":"active","next_action":"launch fresh reviewer",
                      "worker_rules":worker_rules,"worker_runtime":{"harness":"opencode-cli"},
                      "context_checkpoint":{"status":"none"},
-                     "phases":{"p1":{"status":"in-progress","gate_barrier":{"status":"OPEN"},"tasks":{"U1":{"status":"prepared"}}}}}
+                     "phases":{"p1":{"status":"in-progress","tasks":{"U1":{"status":"prepared"}}}}}
             path=root/"state.json"; path.write_text(json.dumps(state))
             cp=self.run_cmd([PYTHON,str(ROOT/"scripts"/"check_state.py"),str(path)])
             self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
@@ -628,9 +635,9 @@ raise SystemExit(2)
             contract=run/"phases"/"p1"/"U1"/"contracts"/"r0001.md"; contract.parent.mkdir(parents=True); (root/"bin").mkdir(); (root/"external").mkdir()
             self.run_cmd(["git","init"],cwd=project); self.run_cmd(["git","config","user.email","dsd@test.invalid"],cwd=project); self.run_cmd(["git","config","user.name","DSD Test"],cwd=project)
             (project/"source.py").write_text("VALUE = 1\n"); (project/"PLAN.md").write_text("plan\n"); self.run_cmd(["git","add","source.py","PLAN.md"],cwd=project); self.run_cmd(["git","commit","-m","base"],cwd=project)
-            contract.write_text("# Task U1 — Set value\nContract revision: r0001\n\n## Objective\nSet value.\n\n## Allowed source changes\n- `source.py`\n\n## Acceptance criteria\n- AC-001 — VALUE equals 2.\n")
+            contract.write_text("# Task U1 — Set value\nContract revision: r0001\n\n## Objective\nSet value.\n\n## Acceptance criteria\n- AC-001 — VALUE equals 2.\n")
             prep=self.run_cmd([PYTHON,str(ROOT/"scripts"/"prepare_worker_rules.py"),"--project-root",str(project.resolve()),"--run-root",str(run.resolve()),"--plan",str((project/"PLAN.md").resolve())]); self.assertEqual(prep.returncode,0,prep.stdout+prep.stderr)
-            state={"project_worktree":str(project.resolve()),"execution_status":"active","next_action":"launch implementer","worker_rules":json.loads(prep.stdout),"worker_runtime":{"harness":"opencode-cli","model":"opencode-go/deepseek-v4-flash","opencode":{"run_db":str((root/"external"/"workers.db").resolve())}},"phases":{"p1":{"status":"in-progress","gate_barrier":{"status":"OPEN","snapshot":None},"tasks":{"U1":{"status":"prepared","current_contract":{"revision":1,"path":str(contract.resolve()),"sha256":hashlib.sha256(contract.read_bytes()).hexdigest()}}}}}}
+            state={"project_worktree":str(project.resolve()),"execution_status":"active","next_action":"launch implementer","worker_rules":json.loads(prep.stdout),"worker_runtime":{"harness":"opencode-cli","model":"opencode-go/deepseek-v4-flash","opencode":{"run_db":str((root/"external"/"workers.db").resolve())}},"phases":{"p1":{"status":"in-progress","tasks":{"U1":{"status":"prepared","current_contract":{"revision":1,"path":str(contract.resolve()),"sha256":hashlib.sha256(contract.read_bytes()).hexdigest()}}}}}}
             (run/"state.json").write_text(json.dumps(state))
             fake=root/"bin"/"opencode"; fake.write_text(r"""#!/usr/bin/env python3
 import pathlib,re,sys
@@ -671,7 +678,7 @@ else: report.write_text('Completed.\n')
             # Deliberately put the DB inside the project. dsd_attempt can derive/setup
             # the attempt, but run_worker must reject it before immutable reservation.
             bad_db = project / "bad-workers.db"
-            state = {"project_worktree": str(project.resolve()), "execution_status": "active", "next_action": "launch", "worker_rules": rules, "worker_runtime": {"harness": "opencode-cli", "model": "x", "opencode": {"run_db": str(bad_db.resolve())}}, "phases": {"p1": {"status": "in-progress", "gate_barrier": {"status": "OPEN", "snapshot": None}, "tasks": {"U1": {"status": "prepared", "current_contract": {"revision": 1, "path": str(contract.resolve()), "sha256": hashlib.sha256(contract.read_bytes()).hexdigest()}}}}}}
+            state = {"project_worktree": str(project.resolve()), "execution_status": "active", "next_action": "launch", "worker_rules": rules, "worker_runtime": {"harness": "opencode-cli", "model": "x", "opencode": {"run_db": str(bad_db.resolve())}}, "phases": {"p1": {"status": "in-progress", "tasks": {"U1": {"status": "prepared", "current_contract": {"revision": 1, "path": str(contract.resolve()), "sha256": hashlib.sha256(contract.read_bytes()).hexdigest()}}}}}}
             (run / "state.json").write_text(json.dumps(state))
             cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "dsd_attempt.py"), "launch", "--run-root", str(run.resolve()), "--phase-id", "p1", "--task-id", "U1", "--role", "reviewer", "--auto-flag="])
             self.assertNotEqual(cp.returncode, 0)

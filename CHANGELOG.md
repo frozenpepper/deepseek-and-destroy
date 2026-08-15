@@ -1,5 +1,37 @@
 # Changelog
 
+## v15.5.2 — Mid-implementation decision escalation
+
+- Made `DECISION_REQUIRED` a first-class mid-implementation consultation path: workers own routine engineering choices, but preserve progress and escalate consequential authority/product/safety decisions they cannot legitimately make.
+- Parent resolves the bounded question and resumes the same trustworthy role/session with the durable decision as exact input; a new contract revision is required only when the decision materially changes task authority, scope, or acceptance.
+- Strengthened incremental report guidance for long/expensive work so decision-boundary progress survives exhaustion.
+- No new role, state machine, callback protocol, or validator.
+
+## v15.5 — Provenance hardening and control-plane deletion
+
+- Prove fresh Reviewer provenance from cold immutable attempt history: an accepted Reviewer must have started after every terminal project-mutating attempt for that task, closing stale-review reuse after a later Fixer/Verification write. Accepted tasks now drop transient `current_attempt`/`last_attempt` state; full history stays in attempt directories.
+- Bind exact report bytes/state at worker/native terminal time. Later gates reject report creation/rewrite/tampering after worker exit; historical unbound reports are explicitly warned as gate-time observations.
+- Replace new whole-worktree hash catalogs with compact Git dirty-set baselines plus HEAD identity and optional ignored-root inventory. Terminal comparison hashes only paths that were dirty at launch, dirty at terminal, or changed across HEAD; historical v4 full inventories remain readable.
+- Remove the half-implemented phase-barrier state machine. Phase close remains semantic: finish mutations, exercise finalization, freeze, fresh Verification, fresh Phase Auditor, parent decision; later mutation makes that evidence stale.
+- Fix Claude async re-wake to recognize the documented high-level `dsd_attempt launch --detach` output, and include `terminal_event` in that compact launch result.
+- Replace copied project-local Python control-plane modules with tiny shims into the installed skill; installer removes legacy copied helpers. Fix Kilo-native mutating-worker doctrine to match worker-owned implementation surfaces.
+- Simplify illustrative configuration and remove obsolete worker-availability/barrier validation. No lock subsystem, semantic parser, or new orchestration layer was added.
+
+## v15.4.7 — Worker-owned implementation surface
+
+- Removed mandatory parent-predicted write scope for Implementer/Fixer tasks. They now discover the files genuinely needed by governing authority; terminal scope remains factual evidence for fresh Review.
+- `write_paths` / `Allowed source changes` is now an optional hard restriction used only when governing authority already supplies a file/directory boundary. An explicit empty restriction still means no project writes.
+- Fresh Reviewer provenance is triggered by actual recorded project mutation rather than the presence of a parent-authored write list.
+- Kept read-only-role mutation failures, optional Verification write grants, immutable DSD control/evidence protections, terminal-bound scope evidence, Discovery delegation, accepted-artifact ownership, and `reportless-no-change`.
+- Simplified concurrency doctrine: assume one intentional writer per checkout; DSD adds no locking protocol. Unexpected concurrent mutation is an attribution problem to resolve or isolate, not a reason to burden every task with predicted write scopes.
+
+## v15.4.6 — Cheap-parent clarity without narrowing strong parents
+
+- Made broad repository/source exploration an explicit Discovery delegation boundary; targeted parent inspection remains available for consequential parent-only decisions.
+- Clarified that only `write_paths` / `Allowed source changes` authorize project mutation, including authority-mandated tracker/status/bookkeeping files when genuinely required; prose elsewhere grants nothing.
+- Prohibited premium-parent hand-editing of accepted worker/project artifacts; corrections route through bounded worker-owned revisions.
+- Added the factual gate label `reportless-no-change` for a completed/0 attempt with no substantive report and zero terminal-bound project movement. The label diagnoses no cause and adds no routing policy.
+
 ## v15.4.5 — Terminal-bound scope and cheaper follow-on routing
 
 - Freeze each attempt's scope comparison immediately after worker/native-Task return and bind its exact path/hash into `terminal.json`; later gate calls reuse the frozen bytes, so post-terminal worktree changes cannot flip an attempt from FAIL to PASS or PASS to FAIL.

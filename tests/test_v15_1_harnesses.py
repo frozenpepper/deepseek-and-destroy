@@ -41,9 +41,12 @@ class V151HarnessAuditTest(unittest.TestCase):
             self.assertTrue(one["changed"]); self.assertFalse(two["changed"])
             self.assertNotIn(".kilo/plugins/", str(plugin))
             tools = project / "DeepSeekAndDestroy" / "tools"
-            for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py"):
-                self.assertTrue((tools / name).is_file(), name)
-            check = self.run_cmd([PYTHON, str(tools / "check_state.py"), "--help"])
+            shim = tools / "context_checkpoint.py"
+            self.assertTrue(shim.is_file())
+            self.assertIn(str((ROOT / "scripts").resolve()), shim.read_text())
+            for legacy in ("check_state.py", "dsd_state.py", "_roles.py", "_rules_snapshot.py", "_contract.py"):
+                self.assertFalse((tools / legacy).exists(), legacy)
+            check = self.run_cmd([PYTHON, str(shim), "--help"])
             self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
 
     def test_opencode_installer_consumes_canonical_plugin_asset(self):
@@ -84,7 +87,7 @@ class V151HarnessAuditTest(unittest.TestCase):
                 self.assertIn("deepseek/deepseek-v4-flash", target.read_text())
             mutating = (project / ".kilo" / "agents" / "dsd-mutating-worker.md").read_text()
             readonly = (project / ".kilo" / "agents" / "dsd-readonly-worker.md").read_text()
-            self.assertIn("Verification when its immutable task contract explicitly authorizes exact generated/project write paths", mutating)
+            self.assertIn("Implementer/Fixer discover the files genuinely needed by authority", mutating)
             self.assertIn("read-only Verification", readonly)
             self.assertIn("Evidence Clerk", readonly)
 
@@ -100,8 +103,11 @@ class V151HarnessAuditTest(unittest.TestCase):
                 ])
                 self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
                 tools = project / "DeepSeekAndDestroy" / "tools"
-                for name in ("context_checkpoint.py", "check_state.py", "_roles.py", "_rules_snapshot.py"):
-                    self.assertTrue((tools / name).is_file(), f"{harness}: {name}")
+                self.assertTrue((tools / "context_checkpoint.py").is_file(), harness)
+                for legacy in ("check_state.py", "dsd_state.py", "_roles.py", "_rules_snapshot.py", "_contract.py"):
+                    self.assertFalse((tools / legacy).exists(), f"{harness}: stale {legacy}")
+                if harness == "claude-code":
+                    self.assertTrue((tools / "claude_worker_rewake.py").is_file())
             codex = json.loads((root / "codex" / ".codex" / "hooks.json").read_text())
             canonical_codex = json.loads((ROOT / "adapters" / "codex" / "hooks.json").read_text())
             for event in canonical_codex["hooks"]:
@@ -139,7 +145,7 @@ class V151HarnessAuditTest(unittest.TestCase):
         config = (ROOT / "CONFIG.example.md").read_text()
         self.assertIn("kilo", config.lower())
         self.assertNotIn("reviewer resume when trustworthy/moderate", config)
-        self.assertIn("fresh DeepSeek worker", config)
+        self.assertIn("fresh contexts", config)
         self.assertFalse((ROOT / "contrib" / "kilo" / "dsd-compaction.ts").exists())
         self.assertFalse((ROOT / "contrib" / "kilo" / "agents").exists())
         self.assertTrue((ROOT / "KILO.md").is_file())

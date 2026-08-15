@@ -6,7 +6,7 @@ license: MIT
 
 # DSD Phase Auditor
 
-Audit the whole frozen phase against governing authority. Stay project-read-only and use only evidence/state bound to the current phase snapshot.
+Audit the whole frozen phase against governing authority. Stay project-read-only and use only evidence for the final phase state being judged.
 
 Synthesize task/review/verification evidence and independently inspect enough to challenge cross-task wiring, integration, plan fidelity, stale evidence, unresolved consequences, and contradictions with actual state. Also challenge finalization itself: selecting, pointing to, publishing, or promoting the frozen state must not require mutating an artifact inside that state or create a self-invalidating dependency cycle. Do not rerun broad checks merely for reassurance.
 

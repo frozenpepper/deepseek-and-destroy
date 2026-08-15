@@ -60,7 +60,23 @@ def _bullet_values(text: str, heading: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+def has_explicit_write_restriction(text: str) -> bool:
+    """Whether authority supplied an explicit project-write boundary.
+
+    Implementer/Fixer contracts do not need to predict their implementation surface.
+    When this section is present, however, it is a real hard restriction; `NONE`
+    therefore means no project writes for that task.
+    """
+    return re.search(r"^##\s+Allowed source changes\s*$", text, re.I | re.M) is not None
+
+
 def allowed_source_changes(text: str) -> list[str]:
+    """Return an optional authority-supplied hard write restriction.
+
+    An absent section means no predeclared restriction for inherent writer roles.
+    A present `NONE` section is an explicit no-write restriction. Prose elsewhere
+    never creates or widens this boundary.
+    """
     return _safe_prefixes(text, "Allowed source changes")
 
 
