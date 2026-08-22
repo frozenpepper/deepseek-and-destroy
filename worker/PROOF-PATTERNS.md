@@ -10,5 +10,6 @@ Load this file only when the task contract names a pattern. These are reasoning 
 - **CONCURRENCY** — challenge ordering/race/duplicate invocation with evidence that distinguishes serialized success from accidental timing.
 - **PRESERVATION** — compare accepted before/after behavior/artifacts without silently rewriting expected evidence.
 - **PROVENANCE** — establish that evidence came from the claimed attempt/source rather than a stale/copied artifact.
+- **REGISTERED-BASELINE** — when introducing a conformance gate over known debt, register each accepted violation by stable identity; fail on new unregistered violations and on unexplained disappearance of registered entries. Repairs deliberately remove only entries proven resolved. Never gate only on an aggregate count.
 
 Use only patterns relevant to the task. Prefer one discriminating counterexample over many weak checks.

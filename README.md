@@ -88,7 +88,7 @@ dsd_attempt.py gate …
 
 If the requested bounded prefix is insufficient for a parent decision, run the optional Evidence Clerk over the exact immutable contract/report/gate. The parent then records acceptance with `dsd_state.py accept-task`.
 
-The premium parent should not hand-edit `state.json`, serialize dozens of launch arguments, inspect parser regexes, or poll workers in chat context.
+The premium parent should not hand-edit `state.json`, serialize dozens of launch arguments, inspect parser regexes, or poll workers in chat context. Routine orchestration stays silent; when the parent does speak, it gives concise self-contained context and never assumes the user read worker output.
 
 ## Self-contained attempts
 
@@ -166,11 +166,11 @@ finish all phase writers
 → premium parent phase decision
 ```
 
-Any later phase mutation invalidates that phase evidence and requires fresh Verification/Audit.
+Any later phase mutation invalidates that phase evidence and requires fresh Verification/Audit. With OpenCode workers, retain the external worker DB through the phase for same-role session continuity, then rotate it only after approved phase close when no live worker/monitor or continuation/recovery need remains.
 
 ## Waiting and failure recovery
 
-External workers emit `terminal.json` when the actual worker process ends. Waiting is quiescent: no terminal event means wait again, without model-driven log/CPU/repository polling.
+External workers emit `terminal.json` when the actual worker process ends. OpenCode exit `0` ends that CLI turn, not necessarily the task; unfinished trustworthy same-role work resumes the recorded session in a fresh numbered attempt. Waiting is quiescent: one timeout without a terminal is a non-event; repeated timeouts plus credible stall evidence permit one bounded diagnosis, never continuous model-driven log/CPU/repository polling. Explicitly superseded terminal-less attempts get a separate immutable `supersession.json` observation boundary—never a fabricated terminal event.
 
 If a worker dies after starting, source changes are **suspect**, not assumed absent. Recovery inspects the immutable baseline/diff and recommends disposition before retry or adoption.
 

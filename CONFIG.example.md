@@ -26,7 +26,7 @@ Implementer/Fixer discover the implementation surface themselves. An explicit `A
 
 ## Context / narration
 
-Use host-provided context percentages only when they are real. Otherwise rely on the checkpoint hooks described in `COMPACTION.md`. Routine worker transitions are silent; speak for consequential escalation, reviewed phase result, final completion, or direct user request.
+Use host-provided context percentages only when they are real. Otherwise rely on the checkpoint hooks described in `COMPACTION.md`. Routine worker transitions are silent. When speaking, assume the user has not read worker output: give concise objective/context, material status and why it matters, recommendation/decision if any, and next action.
 
 ## Kilo native workers
 

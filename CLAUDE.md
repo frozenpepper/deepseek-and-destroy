@@ -26,6 +26,6 @@ If project hooks are unavailable, use:
 python3 <skill>/scripts/dsd_attempt.py wait --run-root <run> --phase-id <phase> --task-id <task>
 ```
 
-A host timeout without terminal evidence is a non-event: wait again without model-visible polling/diagnostics.
+One host timeout without terminal evidence is a non-event. After repeated timeouts, a credible stall signal may justify one bounded lifecycle/transport diagnosis; log age/size and recorded process liveness are clues, not proof. Do not turn that diagnosis into model-visible polling.
 
 The same adapter installs Claude compaction hooks. Its project-local Python files are tiny shims into the installed skill, so a normal skill upgrade does not leave stale copied control-plane code behind. Rerun the installer only if the hook/plugin definition itself changed. On a fresh session follow `SKILL.md`'s resume fast path; load `COMPACTION.md` only when checkpoint state requires it. Claude-native subagent hooks are relevant only when a Claude-native worker backend is explicitly selected.

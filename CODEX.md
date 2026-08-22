@@ -10,7 +10,7 @@ python3 <skill>/scripts/dsd_attempt.py wait   --run-root <run> --phase-id <phase
 python3 <skill>/scripts/dsd_attempt.py gate   --run-root <run> --phase-id <phase> --task-id <task>
 ```
 
-If a foreground tool call can safely stay open for the worker duration, omit `--detach` and let tool completion be the wake event. Otherwise use the long blocking `wait` helper. If the host cuts off a wait before `terminal.json`, that is a non-event: immediately wait again without logs/CPU/state narration.
+If a foreground tool call can safely stay open for the worker duration, omit `--detach` and let tool completion be the wake event. Otherwise use the long blocking `wait` helper. One host cutoff before `terminal.json` is a non-event. After repeated cutoffs, a credible stall signal may justify one bounded lifecycle/transport diagnosis; log age/size and recorded process liveness are clues, not proof, and continuous model-visible polling remains forbidden.
 
 Native Codex agent wait semantics apply only if the run explicitly selected a Codex-native worker backend; they do not describe the default external worker.
 

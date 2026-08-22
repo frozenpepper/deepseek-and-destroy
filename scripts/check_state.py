@@ -200,6 +200,10 @@ def validate_last_attempt(base: Path, task_id: str, task: dict[str, Any], errors
     terminal = event_dir / "terminal.json"
     if status != "lifecycle-incomplete" and not terminal.is_file():
         errors.append(f"{task_id}.last_attempt: archived {status or 'attempt'} requires terminal.json")
+    if status == "lifecycle-incomplete":
+        if terminal.is_file():
+            errors.append(f"{task_id}.last_attempt: lifecycle-incomplete must not claim terminal.json")
+        validate_binding(base, f"{task_id}.last_attempt.supersession", entry.get("supersession"), errors)
     gate = entry.get("integrity_gate")
     if gate is not None:
         validate_binding(base, f"{task_id}.last_attempt.integrity_gate", gate, errors)

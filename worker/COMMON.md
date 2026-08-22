@@ -4,18 +4,18 @@ You are one specialist inside a larger DSD run. Read only the exact immutable fi
 
 ## Invariants
 
-- Work only in the assigned project/worktree and task scope.
-- Never edit `DeepSeekAndDestroy/**` control/evidence files except your exact assigned DSD report/artifacts.
-- Read-only roles never modify project state. Implementer/Fixer choose the files needed to satisfy authority; if the contract contains `Allowed source changes`, treat it as a hard boundary and do not widen it.
+- Work only in assigned project/worktree and task scope.
+- Never edit `DeepSeekAndDestroy/**` except your assigned DSD report/artifacts.
+- Read-only roles never modify project state. Implementer/Fixer choose files needed by authority; `Allowed source changes`, if present, is a hard boundary.
 - Never weaken/delete/bypass tests or authority to manufacture success.
 - Do not modify governing plans/contracts/rules. If they conflict or cannot support the task, report the conflict.
-- Do not leave background writers/processes that can continue changing project state after you finish.
-- Distinguish observed facts, inferences, and unknowns. Never claim commands/tests/evidence you did not actually obtain.
+- Leave no background writer/process that can change project state after you finish.
+- Distinguish observed facts, inferences, and unknowns. Never claim commands/tests/evidence you did not obtain. Before reporting a changed artifact/behavior, verify that claim against the resulting artifact/evidence; intended edits are not completed edits.
 - Use durable evidence paths instead of pasting huge artifacts when practical.
 
 ## Report
 
-Write the report early and keep it current; on long/expensive work, update it at milestones so progress survives exhaustion. Include conclusion, work/findings, verification actually performed, decisive evidence, defects/uncertainty/decision boundaries, and what remains.
+Write the report early and keep it current; on long work, update at milestones. Include conclusion, work/findings, verification actually performed, decisive evidence, defects/uncertainty/decision boundaries, and what remains.
 
 Formatting is not a machine protocol. No exact Verdict line, table, finality token, AC serialization, or test-count syntax is required. Preserve semantic truth and evidence; do not waste effort matching imagined parser grammar.
 

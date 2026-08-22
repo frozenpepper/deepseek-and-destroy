@@ -102,6 +102,88 @@ class V155Adversarial(unittest.TestCase):
         })
         return event
 
+    def _incomplete_writer(self, task_root: Path, contract: Path, observed: str, *, valid: bool = True) -> Path:
+        event = task_root / "attempts" / "implementer-1"; event.mkdir(parents=True, exist_ok=True)
+        reservation = event / "launch-reservation.json"
+        write_json(reservation, {
+            "format": "dsd-worker-launch-reservation-v2", "task_id": task_root.name,
+            "role": "implementer", "attempt": 1, "writes_project": True,
+            "task_contract": str(contract.resolve()), "task_contract_sha256": sha(contract),
+            "reserved_at": "2026-08-13T10:00:00+00:00",
+        })
+        supersession = {
+            "format": "dsd-attempt-supersession-v1",
+            "status": "lifecycle-incomplete", "disposition": "superseded",
+            "observed_at": observed, "terminal_present": False,
+            "launch_reservation": str(reservation.resolve()),
+            "launch_reservation_sha256": sha(reservation),
+            "recorded_process_ids": {}, "recorded_processes_alive": [],
+        }
+        if not valid:
+            supersession["recorded_processes_alive"] = [99999]
+        write_json(event / "supersession.json", supersession)
+        return event
+
+    def _review_gate(self, task_root: Path, contract: Path, reserved: str, ended: str) -> Path:
+        reviewer = self._attempt(task_root, contract, "reviewer", 1, reserved, ended, writes=False, changed=False)
+        report = reviewer / "report.md"; gate = reviewer / "evidence-gate.json"
+        write_json(gate, {
+            "format": "dsd-integrity-gate-v2", "integrity_ok": True, "ready_for_interpretation": True,
+            "errors": [], "role": "reviewer", "task": str(contract.resolve()),
+            "report": str(report.resolve()), "report_sha256": sha(report),
+            "terminal_event": str((reviewer / "terminal.json").resolve()), "scope": {"changed_count": 0},
+        })
+        return gate
+
+    def _accept_state(self, run: Path, contract: Path) -> None:
+        write_json(run / "state.json", {"execution_status": "active", "next_action": "decide", "phases": {"p1": {"status": "in-progress", "tasks": {"U1": {
+            "status": "gated", "current_contract": {"revision": 1, "path": str(contract.resolve()), "sha256": sha(contract)}
+        }}}}})
+
+    def test_superseded_incomplete_writer_can_be_accepted_after_fresh_reviewer(self):
+        with tempfile.TemporaryDirectory() as td:
+            run = Path(td) / "DeepSeekAndDestroy" / "run"
+            task_root = run / "phases" / "p1" / "tasks" / "U1"
+            contract = task_root / "contracts" / "r0001.md"; contract.parent.mkdir(parents=True)
+            contract.write_text("# Task\nContract revision: r0001\n")
+            self._incomplete_writer(task_root, contract, "2026-08-13T10:02:00+00:00")
+            gate = self._review_gate(task_root, contract, "2026-08-13T10:03:00+00:00", "2026-08-13T10:04:00+00:00")
+            self._accept_state(run, contract)
+            cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "dsd_state.py"), "accept-task",
+                               "--run-root", str(run.resolve()), "--phase-id", "p1", "--task-id", "U1",
+                               "--evidence-gate", str(gate.resolve())])
+            self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
+
+    def test_reviewer_before_supersession_boundary_is_stale(self):
+        with tempfile.TemporaryDirectory() as td:
+            run = Path(td) / "DeepSeekAndDestroy" / "run"
+            task_root = run / "phases" / "p1" / "tasks" / "U1"
+            contract = task_root / "contracts" / "r0001.md"; contract.parent.mkdir(parents=True)
+            contract.write_text("# Task\nContract revision: r0001\n")
+            self._incomplete_writer(task_root, contract, "2026-08-13T10:02:00+00:00")
+            gate = self._review_gate(task_root, contract, "2026-08-13T10:01:00+00:00", "2026-08-13T10:01:30+00:00")
+            self._accept_state(run, contract)
+            cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "dsd_state.py"), "accept-task",
+                               "--run-root", str(run.resolve()), "--phase-id", "p1", "--task-id", "U1",
+                               "--evidence-gate", str(gate.resolve())])
+            self.assertEqual(cp.returncode, 2, cp.stdout + cp.stderr)
+            self.assertIn("predates later project mutation", cp.stderr)
+
+    def test_invalid_supersession_does_not_forge_freshness_boundary(self):
+        with tempfile.TemporaryDirectory() as td:
+            run = Path(td) / "DeepSeekAndDestroy" / "run"
+            task_root = run / "phases" / "p1" / "tasks" / "U1"
+            contract = task_root / "contracts" / "r0001.md"; contract.parent.mkdir(parents=True)
+            contract.write_text("# Task\nContract revision: r0001\n")
+            self._incomplete_writer(task_root, contract, "2026-08-13T10:02:00+00:00", valid=False)
+            gate = self._review_gate(task_root, contract, "2026-08-13T10:03:00+00:00", "2026-08-13T10:04:00+00:00")
+            self._accept_state(run, contract)
+            cp = self.run_cmd([PYTHON, str(ROOT / "scripts" / "dsd_state.py"), "accept-task",
+                               "--run-root", str(run.resolve()), "--phase-id", "p1", "--task-id", "U1",
+                               "--evidence-gate", str(gate.resolve())])
+            self.assertEqual(cp.returncode, 2, cp.stdout + cp.stderr)
+            self.assertIn("lacks terminal provenance", cp.stderr)
+
     def test_stale_reviewer_cannot_be_reused_after_later_fixer_mutation(self):
         with tempfile.TemporaryDirectory() as td:
             run = Path(td) / "DeepSeekAndDestroy" / "run"
@@ -319,6 +401,74 @@ class V155Adversarial(unittest.TestCase):
             self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
             phase = json.loads((run / "state.json").read_text())["phases"]["p1"]
             self.assertNotIn("gate_barrier", phase)
+
+    def test_v1554_field_doctrine_closes_loopholes_without_new_protocol(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        workspace = (ROOT / "WORKSPACE.md").read_text(encoding="utf-8")
+        opencode = (ROOT / "OPENCODE.md").read_text(encoding="utf-8")
+        prompts = (ROOT / "PROMPTS.md").read_text(encoding="utf-8")
+        common = (ROOT / "worker" / "COMMON.md").read_text(encoding="utf-8")
+        proof = (ROOT / "worker" / "PROOF-PATTERNS.md").read_text(encoding="utf-8")
+
+        self.assertIn("read-only attempts overlap only each other", skill)
+        self.assertIn("no worker/parent may mutate observed project state", skill)
+        self.assertIn("Parent project edits count", skill)
+        self.assertIn("scope-observed project state", workspace)
+        self.assertIn("Writer + read-only requires isolated worktrees", workspace)
+        self.assertIn("bounded source read/search", skill)
+        self.assertIn("measure first with read-only Discovery", skill)
+        self.assertIn("Do not predict the implementation diff", prompts)
+        self.assertIn("established orientation", prompts)
+        self.assertIn("bounded tail before relaunching", opencode)
+        self.assertIn("recover stranded findings/pointers", opencode)
+        self.assertIn("claims, not semantic acceptance", opencode)
+        self.assertIn("verify that claim against the resulting artifact/evidence", common)
+        self.assertIn("REGISTERED-BASELINE", proof)
+        self.assertIn("unexplained disappearance", proof)
+        self.assertIn("reintroduce report parser grammar", prompts)
+
+        # These are doctrine/proof recipes, not new executable semantic machinery.
+        scripts = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in (ROOT / "scripts").glob("*.py"))
+        self.assertNotIn("REGISTERED-BASELINE", scripts)
+        self.assertNotIn("registered_baseline", scripts.lower())
+        spec = (ROOT / "templates" / "task-contract-spec.example.json").read_text(encoding="utf-8")
+        self.assertNotIn('"orientation"', spec)
+        for retired in ("concurrency_owner.py", "report_truth_validator.py", "turn_scheduler.py"):
+            self.assertFalse((ROOT / "scripts" / retired).exists())
+
+    def test_v1555_opencode_continuity_db_rotation_and_user_reporting_are_explicit(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        opencode = (ROOT / "OPENCODE.md").read_text(encoding="utf-8")
+        config = (ROOT / "CONFIG.example.md").read_text(encoding="utf-8")
+
+        self.assertIn("Exit 0 ends that CLI process turn only", opencode)
+        self.assertIn("does not prove task completion", opencode)
+        self.assertIn("new numbered same-role attempt", opencode)
+        self.assertIn("--resume-session <session-id>", opencode)
+        self.assertIn("phase session state, not per-attempt trash", opencode)
+        self.assertIn("approved phase close", opencode)
+        self.assertIn("no worker/monitor is live", opencode)
+        self.assertIn("`-wal`/`-shm`", opencode)
+        self.assertIn("Never rotate at attempt/task boundaries", opencode)
+        self.assertIn("including `0`, ends only that process turn", skill)
+        self.assertIn("assume the user saw none of the worker output", skill)
+        self.assertIn("current objective", skill)
+        self.assertIn("why it matters", skill)
+        self.assertIn("next action", skill)
+        self.assertIn("assume the user has not read worker output", config)
+
+        # This release documents lifecycle/use of existing primitives; it does not
+        # add semantic completion detection or a DB/session scheduler.
+        self.assertFalse((ROOT / "scripts" / "opencode_session_manager.py").exists())
+        self.assertFalse((ROOT / "scripts" / "opencode_db_scheduler.py").exists())
+        self.assertFalse((ROOT / "scripts" / "semantic_completion_detector.py").exists())
+
+        help_commands = ([PYTHON, str(ROOT / "scripts" / "run_worker.py"), "--help"],
+                         [PYTHON, str(ROOT / "scripts" / "dsd_attempt.py"), "launch", "--help"])
+        for cmd in help_commands:
+            cp = self.run_cmd(cmd)
+            self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
+            self.assertIn("benign early stop", " ".join(cp.stdout.split()))
 
 
 if __name__ == "__main__":

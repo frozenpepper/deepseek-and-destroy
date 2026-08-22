@@ -1,5 +1,35 @@
 # Changelog
 
+## v15.5.5 — Session continuity, phase DB rotation, and user-facing clarity
+
+- Clarified that OpenCode exit `0` ends a CLI process turn, not the semantic task: unfinished trustworthy same-role work should resume the recorded session in a fresh numbered attempt rather than cold-starting or being mislabeled as transport failure.
+- Made the external OpenCode DB explicitly useful phase-local session state: retain it throughout the active phase, then delete the DB plus SQLite sidecars only after approved phase close when no worker/monitor is live and no continuation/recovery remains; the next launch recreates it at the configured path.
+- Expanded `--resume-session` help to cover benign early stops; runtime semantics remain unchanged.
+- Strengthened parent silence/user-reporting doctrine: routine orchestration stays quiet, while any user-facing update is concise but self-contained and assumes the user has not read worker output or internal attempt/report context.
+- No session manager, DB scheduler/state machine, semantic completion detector, report parser, or automatic cleanup mechanism was added.
+
+## v15.5.4 — Field doctrine alignment
+
+- Made scope-observed project mutation exclusive: read-only attempts may parallelize only with read-only attempts in the same checkout; parent project edits count, excluded DSD bookkeeping does not, and writer/read-only overlap requires isolated worktrees.
+- Clarified premium discipline: do not duplicate specialist judgment, but bounded recovery/contract-shaping reads and cheap source probes are allowed; broad tracing/proof remains delegated.
+- Distinguished orientation from diff prediction: pass known entry points, symbols, invocations, findings, and evidence paths without constraining worker-owned implementation choices. Added the optional read-only measure → writer pattern when cold orientation would otherwise be expensive.
+- Added reportless recovery salience: after terminal/reconciled lifecycle, inspect a bounded substantial `worker.log` tail before paying for rediscovery.
+- Strengthened claim discipline: workers verify artifact/behavior claims before reporting them, and parent doctrine treats prose as claims/evidence pointers rather than proof of artifact state.
+- Promoted repeated run-specific lessons into worker-rules revisions while forbidding run rules from contradicting universal protocol or reintroducing report parser grammar.
+- Added the optional `REGISTERED-BASELINE` proof recipe for new conformance gates over known debt: stable per-violation identity, failure on new entries, and failure on unexplained disappearance.
+- Reframed silent continuation: do not yield merely to summarize when a safe `next_action` is executable.
+- Added adversarial regressions asserting these remain doctrine/proof recipes rather than new executable semantic machinery.
+
+## v15.5.3 — Recovery salience and supersession provenance
+
+- Added hot triggers to cold-load lifecycle or transport doctrine at the first matching anomaly instead of re-deriving documented recovery behavior.
+- Distinguished a single timeout from a credible repeated stall: bounded diagnosis is allowed, while log age/size and recorded liveness remain clues rather than proof and continuous model-visible polling remains forbidden.
+- Fixed the `--supersede-incomplete` acceptance dead-end without fabricating `terminal.json`: explicit terminal-less supersession now writes immutable `supersession.json`, whose observation time is a conservative no-more-writes boundary for subsequent fresh-Reviewer provenance.
+- Made every generated worker handoff remind the worker that this attempt has a fresh self-contained report path; trusted same-session continuation must not append only to an older attempt report.
+- Added bounded same-root-cause family sweeping and explicit plausible-but-wrong counterfactual review doctrine.
+- Added lifecycle/adversarial regressions for supersession creation, stale pre-supersession review, malformed supersession evidence, and successful post-supersession acceptance.
+- No stall detector, report grammar, semantic parser, callback protocol, new role, or fabricated lifecycle terminal was added.
+
 ## v15.5.2 — Mid-implementation decision escalation
 
 - Made `DECISION_REQUIRED` a first-class mid-implementation consultation path: workers own routine engineering choices, but preserve progress and escalate consequential authority/product/safety decisions they cannot legitimately make.

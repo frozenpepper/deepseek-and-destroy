@@ -86,6 +86,40 @@ def _attempt_live(attempt: dict[str, Any]) -> bool:
     return any(pid_alive(attempt.get(key)) for key in ("worker_pid", "monitor_pid", "launcher_pid"))
 
 
+def _create_supersession(run_root: Path, attempt: dict[str, Any]) -> dict[str, str]:
+    """Record an immutable observation boundary for an explicitly abandoned terminal-less attempt."""
+    event_dir = _attempt_event_dir(run_root, attempt)
+    if event_dir is None:
+        raise ValueError("cannot supersede attempt without a valid event directory")
+    reservation_path = event_dir / "launch-reservation.json"
+    if not reservation_path.is_file():
+        raise ValueError("cannot supersede attempt without its immutable launch reservation")
+    alive = {key: attempt.get(key) for key in ("worker_pid", "monitor_pid", "launcher_pid") if pid_alive(attempt.get(key))}
+    if alive:
+        raise ValueError("current attempt is still live; refusing to supersede it")
+
+    path = event_dir / "supersession.json"
+    if path.exists():
+        reservation = load_json(reservation_path)
+        if _supersession_time(run_root, event_dir, reservation) is None:
+            raise ValueError(f"existing supersession evidence is invalid: {path}")
+        return {"path": str(path), "sha256": sha256(path)}
+    recorded = {key: attempt.get(key) for key in ("worker_pid", "monitor_pid", "launcher_pid") if isinstance(attempt.get(key), int)}
+    data = {
+        "format": "dsd-attempt-supersession-v1",
+        "status": "lifecycle-incomplete",
+        "disposition": "superseded",
+        "observed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "terminal_present": False,
+        "launch_reservation": str(reservation_path),
+        "launch_reservation_sha256": sha256(reservation_path),
+        "recorded_process_ids": recorded,
+        "recorded_processes_alive": [],
+    }
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8", errors="strict")
+    return {"path": str(path), "sha256": sha256(path)}
+
+
 def archive_current_attempt(
     run_root: Path,
     task: dict[str, Any],
@@ -113,6 +147,7 @@ def archive_current_attempt(
             )
         archived_status = "lifecycle-incomplete"
         disposition = "superseded"
+        supersession = _create_supersession(run_root, current)
     else:
         archived_status = status or "process-exited"
         disposition = "completed" if archived_status not in {"integrity-failed", "report-recovery"} else archived_status
@@ -120,6 +155,8 @@ def archive_current_attempt(
     entry = dict(current)
     entry["status"] = archived_status
     entry["disposition"] = disposition
+    if not terminal_exists:
+        entry["supersession"] = supersession
     task["last_attempt"] = entry
     task.pop("current_attempt", None)
     return entry
@@ -380,16 +417,40 @@ def _iso_time(raw: Any) -> datetime | None:
         return None
 
 
-def _terminal_scope_changed(run_root: Path, event_dir: Path, reservation: dict[str, Any]) -> tuple[bool, datetime | None]:
-    """Return factual mutation + terminal time from cold immutable attempt evidence.
+def _supersession_time(run_root: Path, event_dir: Path, reservation: dict[str, Any]) -> datetime | None:
+    path = event_dir / "supersession.json"
+    if not path.is_file():
+        return None
+    try:
+        data = load_json(path)
+        reservation_path = event_dir / "launch-reservation.json"
+        recorded_reservation = run_path(run_root, data.get("launch_reservation", ""))
+        if (
+            data.get("format") != "dsd-attempt-supersession-v1"
+            or data.get("status") != "lifecycle-incomplete"
+            or data.get("disposition") != "superseded"
+            or data.get("terminal_present") is not False
+            or data.get("recorded_processes_alive") != []
+            or recorded_reservation != reservation_path.resolve()
+            or data.get("launch_reservation_sha256") != sha256(reservation_path)
+        ):
+            return None
+        return _iso_time(data.get("observed_at"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
 
-    New attempts use terminal-bound scope. Historical attempts fall back to an existing
-    integrity gate; if neither can prove no movement, treat a writer as potentially
-    mutating rather than weakening fresh-review provenance.
+
+def _terminal_scope_changed(run_root: Path, event_dir: Path, reservation: dict[str, Any]) -> tuple[bool, datetime | None]:
+    """Return conservative mutation + no-more-writes boundary from immutable attempt evidence.
+
+    Normal attempts use terminal-bound scope. Explicitly superseded terminal-less writers
+    remain conservatively mutating, but their supersession observation is a valid boundary
+    after which a fresh Reviewer can establish the resulting repository state. Historical
+    terminal attempts may fall back to an existing integrity gate.
     """
     terminal_path = event_dir / "terminal.json"
     if not terminal_path.is_file():
-        return bool(reservation.get("writes_project")), None
+        return bool(reservation.get("writes_project")), _supersession_time(run_root, event_dir, reservation)
     terminal = load_json(terminal_path)
     ended = _iso_time(terminal.get("process_ended_at") or terminal.get("ended_at"))
     binding = terminal.get("terminal_scope")

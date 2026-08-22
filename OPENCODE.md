@@ -1,80 +1,59 @@
 # DSD OpenCode Worker Adapter
 
-Cold reference for the default **worker transport**. The premium parent may run in any supported harness; external workers still use OpenCode unless configuration selects another backend.
+Cold reference for default **worker transport**. Parent may use any supported harness; external workers use OpenCode unless configured otherwise.
 
-Defaults:
-- model `opencode-go/deepseek-v4-flash`;
-- fresh worker session on normal role changes;
-- one disposable OpenCode DB per DSD run, outside every project/worktree.
+Defaults: model `opencode-go/deepseek-v4-flash`; fresh session on role change; one external disposable DB for the active phase, reused for same-role continuation.
 
 ## External DB invariant
 
-Never use the user's interactive OpenCode DB and never place a worker DB inside the repository. OpenCode project refresh can otherwise scan its own live SQLite file. Persist one absolute external run DB in `state.json`; deliberate parallel lanes may use one DB per lane.
+Never use the user's interactive OpenCode DB or place a worker DB inside the repository/run tree: project refresh can scan its own live SQLite file. Persist one absolute external path in `state.json`; isolated parallel lanes may use one DB each. Prefer an OS cache root such as `~/Library/Caches/DeepSeekAndDestroy/opencode/<run-id>/workers.db` or `${XDG_CACHE_HOME:-~/.cache}/deepseek-and-destroy/opencode/<run-id>/workers.db`.
 
-Typical roots:
+The DB is **phase session state, not per-attempt trash**. Keep it through the active phase so healthy sessions survive CLI turn endings. After **approved phase close**, when no worker/monitor is live and no continuation/recovery needs those sessions, delete the DB plus SQLite `-wal`/`-shm`; the next launch recreates it at the configured path. Never rotate at attempt/task boundaries or while the phase may resume.
 
-```text
-macOS:  ~/Library/Caches/DeepSeekAndDestroy/opencode/<run-id>/workers.db
-other:  ${XDG_CACHE_HOME:-~/.cache}/deepseek-and-destroy/opencode/<run-id>/workers.db
-```
-
-Delete the disposable DB only after the run is terminal and no same-role continuation/recovery can need it.
-
-## Normal external-worker path
+## Normal path
 
 Do not hand-build OpenCode commands or attempt paths:
 
 ```bash
-python3 <skill>/scripts/dsd_attempt.py launch \
-  --run-root <run> --phase-id <phase> --task-id <task> --role <role> [--detach]
-
+python3 <skill>/scripts/dsd_attempt.py launch --run-root <run> --phase-id <phase> --task-id <task> --role <role> [--detach]
 # detached only
-python3 <skill>/scripts/dsd_attempt.py wait \
-  --run-root <run> --phase-id <phase> --task-id <task>
-
-python3 <skill>/scripts/dsd_attempt.py gate \
-  --run-root <run> --phase-id <phase> --task-id <task> [--surface]
+python3 <skill>/scripts/dsd_attempt.py wait   --run-root <run> --phase-id <phase> --task-id <task>
+python3 <skill>/scripts/dsd_attempt.py gate   --run-root <run> --phase-id <phase> --task-id <task> [--surface]
 ```
 
-Use `--surface` only when the premium parent is about to interpret that result. Intermediate specialist gates should return mechanics only.
-
-`dsd_attempt.py` derives the exact contract/rules/runtime, self-contained attempt directory, scope baseline, prompt/report/log paths, immutable launch reservation, OpenCode invocation, and state binding. Lower-level helpers are recovery/test primitives, not the normal parent interface.
+Use `--surface` only at a parent interpretation boundary; intermediate gates return mechanics. `dsd_attempt.py` derives runtime, immutable attempt authority, baseline, fresh report/log paths, invocation, and state binding. Lower helpers are recovery/test primitives.
 
 ## Lifecycle / waiting
 
-`launch-reservation.json` is immutable attempt authority. `attempt.json` records the running child; `terminal.json` records the exact child process exit. Process exit proves the lifecycle ended, **not** that the report is semantically complete or correct.
+`launch-reservation.json` is immutable attempt authority; `attempt.json` records the running child; `terminal.json` records the exact child exit. **Exit 0 ends that CLI process turn only; it does not prove task completion.**
 
-Wait quiescently through the active parent adapter. A wait/tool timeout without `terminal.json` is a non-event: wait again. Do not spend premium turns polling logs, CPU, or repository state unless lifecycle evidence is contradictory and Recovery needs diagnosis.
+Wait quiescently. One wait/tool timeout without terminal evidence is a non-event. Repeated timeouts plus a credible stall signal permit one bounded diagnosis; log age/size and recorded liveness are clues, not proof. Never continuously poll logs, CPU, or repository state in premium context.
 
-After terminal completion:
-- exit 0 → objective integrity gate;
+After terminal:
+- exit 0 → objective integrity gate, then decide whether the task is actually finished;
 - post-start nonzero/abnormal exit → preserve attempt and suspect changes for Recovery;
 - clear pre-start/provider failure → availability handling.
 
-Workers must not leave background writers capable of mutating project state after terminal exit. Discovery of one invalidates the no-more-writes assumption and enters Recovery.
+A background writer surviving terminal invalidates the no-more-writes assumption and enters Recovery.
 
 ## Report placeholder
 
-The launcher pre-creates a byte-distinct report placeholder. If it remains unchanged at terminal exit, the gate reports **report recovery**, not semantic failure and never “no source changes.” Preserve the attempt; do not rerun a technical worker merely to satisfy formatting.
+The launcher pre-creates a byte-distinct report placeholder. If unchanged at terminal, the gate reports **report recovery**, not semantic failure or “no source changes.” Preserve the attempt; never rerun merely for formatting. After terminal/reconciled incomplete lifecycle, inspect a bounded tail before relaunching when `worker.log` is substantial, to recover stranded findings/pointers; log prose remains claims, not semantic acceptance.
 
-Worker reports otherwise remain natural language. No FINAL/verdict/table grammar is required.
+Reports remain natural language; no FINAL/verdict/table grammar is required.
 
-## Sessions
+## Sessions and benign early stops
 
-Normal role change = fresh session. Durable reports/evidence carry context between roles.
+Role change = fresh session; durable evidence carries context between roles. Same-role work should reuse a trustworthy session when useful.
 
-`run_worker.py --resume-session` exists only for trustworthy **same-role** continuation: transport/recovery, or resuming a worker after a `DECISION_REQUIRED` parent decision. Pass the durable decision as exact input. If the decision materially changed task authority/scope/acceptance, bind the new contract revision first; session continuity may still be reused. If exact continuation is uncertain, start a fresh same-role attempt.
+OpenCode can normally exit `0` while the current contract is unfinished. Do **not** call that task success, transport failure, or a cold-rerun case. If `terminal.json.session_id` exists and the phase DB remains, launch a **new numbered same-role attempt** with `--resume-session <session-id>` and minimal exact input, e.g. `Continue the current contract from this session; finish outstanding work and write this attempt's self-contained report.` The new attempt still gets fresh immutable reservation/baseline/log/terminal/report evidence.
+
+Use the same path after trustworthy transport/recovery or `DECISION_REQUIRED`. If authority/scope/acceptance materially changed, bind the new contract revision first. If session continuity is uncertain/unavailable, start a fresh same-role attempt.
 
 ## Provider trouble
 
-Before burning repeated task attempts on empty/banner/auth/provider failures:
-1. verify the exact model id (`opencode models`);
-2. use `scripts/opencode_probe.py` with a fresh external temporary DB;
-3. classify availability separately from task failure;
-4. persist backoff/fallback state.
-
-Do not infer billing exhaustion from an error string alone. Credentials remain in OpenCode's normal auth/config locations, separate from `OPENCODE_DB`.
+Before burning attempts on empty/banner/auth/provider failures: verify the exact model id with `opencode models`; probe it using `scripts/opencode_probe.py` and a fresh external temporary DB; classify availability separately from task failure; persist backoff/fallback state. Do not infer billing exhaustion from an error string alone. Credentials stay in OpenCode's normal auth/config, separate from `OPENCODE_DB`.
 
 ## OpenCode as premium parent
 
-The parent OpenCode session and worker OpenCode processes remain separate concerns. Workers still use the external run DB above. Install the project-local DSD compaction adapter when desired and use `COMPACTION.md` only for context checkpoint/resume.
+Parent/worker sessions are separate. Workers use the external phase DB above. Install the project-local compaction adapter when desired; `COMPACTION.md` governs checkpoint/resume.

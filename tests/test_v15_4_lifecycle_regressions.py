@@ -125,6 +125,16 @@ class V154LifecycleRegressions(unittest.TestCase):
             task = json.loads((run / "state.json").read_text())["phases"]["p1"]["tasks"]["t1"]
             self.assertEqual(task["last_attempt"]["status"], "lifecycle-incomplete")
             self.assertEqual(task["last_attempt"]["disposition"], "superseded")
+            binding = task["last_attempt"]["supersession"]
+            supersession = old / "supersession.json"
+            self.assertEqual(binding["path"], str(supersession.resolve()))
+            self.assertEqual(binding["sha256"], sha(supersession))
+            data = json.loads(supersession.read_text())
+            self.assertEqual(data["status"], "lifecycle-incomplete")
+            self.assertEqual(data["disposition"], "superseded")
+            self.assertFalse(data["terminal_present"])
+            self.assertEqual(data["recorded_processes_alive"], [])
+            self.assertFalse((old / "terminal.json").exists())
             self.assertEqual(task["current_attempt"]["role"], "recovery")
 
     def test_live_terminal_less_attempt_cannot_be_superseded(self):

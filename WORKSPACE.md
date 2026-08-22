@@ -1,6 +1,6 @@
 # DSD Workspace Contract
 
-Cold reference for state/evidence/recovery/concurrency. Normal tasks use `dsd_attempt.py` without repeatedly loading this file.
+Cold reference for state/evidence/recovery/concurrency. Normal tasks use `dsd_attempt.py` without reloading it.
 
 ## Run layout
 
@@ -25,6 +25,7 @@ DeepSeekAndDestroy/plans/<plan-id>/runs/<run-id>/
         launch-reservation.json
         attempt.json
         terminal.json
+        supersession.json    # exceptional terminal-less supersession only
         evidence-gate.json
 ```
 
@@ -46,7 +47,7 @@ At run level keep execution status, one exact `next_action`, worker-rules/runtim
 
 `dsd_attempt.py launch` resolves run-root authority, preflights the prior attempt, allocates/captures/renders, starts the detached monitor, and binds the new live attempt immediately; foreground mode then waits cheaply inside the helper. A later role moves the prior terminal attempt to bounded `last_attempt`.
 
-No terminal event blocks normal relaunch. Recovery may use `--supersede-incomplete` only after establishing the old worker cannot still write; history records `lifecycle-incomplete`/`superseded`, never a fake exit.
+No terminal event blocks normal relaunch. Recovery may use `--supersede-incomplete` only after establishing the old worker cannot still write. The helper records immutable `supersession.json` with that observation boundary; history records `lifecycle-incomplete`/`superseded`, never a fake exit. Fresh-review provenance may conservatively treat a superseded writer as having mutated, but a Reviewer launched after this boundary can still establish the resulting repository state.
 
 `terminal.json` proves lifecycle end, not semantic correctness, and binds both the exact report bytes/state and compact scope diff observed immediately after worker return; later gates reuse that evidence instead of re-reading mutable artifacts/worktree state. A terminal attempt without usable report gates to `report-recovery`; worker prose is omitted unless `--surface` is requested.
 
@@ -73,7 +74,7 @@ If a started worker ends without usable report evidence, first establish that no
 
 Python never decides whether long prose proves requirements or means PASS/FAIL. At a parent decision boundary, request a bounded report surface; if that is insufficient, run one always-read-only Evidence Clerk over the exact contract/report/gate. Missing technical proof goes to targeted Verification/Review. The parent decides.
 
-Every project mutation requires **fresh Reviewer provenance** before acceptance. Python may enforce that provenance fact only; it does not judge the review. A Fixer never validates its own repair; role changes use fresh contexts.
+Every project mutation needs **fresh Reviewer provenance** before acceptance. Python may enforce that provenance fact only; it does not judge the review. A Fixer never validates its own repair; role changes use fresh contexts.
 
 ## Phase close
 
@@ -81,9 +82,9 @@ Finish phase mutations, exercise finalization operations, freeze the intended fi
 
 ## Concurrency / waiting / availability
 
-Assume one intentional project writer per checkout. DSD does not implement file locking or require the parent to pre-plan disjoint write scopes. If another writer is discovered and attribution becomes unsafe, stop writers until ownership is resolved or use an isolated worktree.
+Scope-observed mutation is exclusive per checkout. Read-only attempts overlap only each other; no worker/parent may change scope-observed project state while one is live. Parent project edits count; excluded DSD bookkeeping does not. Writer + read-only requires isolated worktrees. No locking.
 
-Waiting is quiescent. Do not use model turns to poll logs/CPU/repository. Provider/quota/auth failure is infrastructure state, not permission for the premium parent to become the implementation worker. Preserve suspect writes before retrying post-start failures.
+Waiting is quiescent. A single timeout is not a stall. Repeated timeouts plus credible stall evidence permit one bounded diagnosis; log mtime/size and recorded liveness are diagnostic clues only. Do not turn diagnosis into model-driven log/CPU/repository polling. Provider/quota/auth failure is infrastructure state, not permission for the premium parent to become the implementation worker. Preserve suspect writes before retrying post-start failures.
 
 ## Resume
 

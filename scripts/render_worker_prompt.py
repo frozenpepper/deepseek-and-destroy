@@ -84,6 +84,7 @@ def main() -> int:
         lines += ["Additional exact inputs (path + SHA-256):", *[f"- {path} | {digest(path)}" for path in inputs]]
     lines += [
         f"Report: {report}",
+        "This attempt has its own report path. Make that report self-contained; start it early and keep it current.",
         "Do the bounded role task from authority. Preserve truthful semantic evidence; report formatting is not a protocol.",
         "Final stdout: report path plus at most one short conclusion.",
     ]

@@ -490,7 +490,7 @@ def parser() -> argparse.ArgumentParser:
     l.add_argument("--model", help="override state.worker_runtime.model")
     l.add_argument("--detach", action="store_true")
     l.add_argument("--wait-kind")
-    l.add_argument("--resume-session", help="trustworthy same-role continuation: transport/recovery or post-DECISION_REQUIRED resume")
+    l.add_argument("--resume-session", help="trustworthy same-role continuation: benign early stop, transport/recovery, or post-DECISION_REQUIRED resume")
     l.add_argument("--auto-flag", default="--auto", help="OpenCode permission flag; pass empty string to omit")
     l.add_argument("--input", action="append", default=[], help="additional exact run artifact input supplied to this worker")
     l.add_argument("--force-read-only", action="store_true", help="reserve attempt as project-read-only regardless of task write scope")

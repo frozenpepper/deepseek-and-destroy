@@ -31,7 +31,7 @@ Typical spec:
 }
 ```
 
-Keep only task-specific **deltas**. Point `authority` at readable plan/ADR/source or a recorded major decision (for example `D-039`) instead of copying it into `objective`. Empty optional fields may be omitted. Implementer/Fixer normally discover their own implementation files. Add `write_paths` only when authority already says the task is confined to specific files/directories; presence makes that boundary mechanically hard, and an explicit empty list means no project writes. `extra_inventory` is likewise optional for already-known ignored/load-bearing roots.
+Keep only task-specific **deltas**. Point `authority` at readable plan/ADR/source or a recorded major decision (for example `D-039`) instead of copying it into `objective`. Empty optional fields may be omitted. Do not predict the implementation diff, but pass established orientation in `inputs`/task prose when useful: entry points, symbols, exact invocations, prior findings, and evidence paths. Implementer/Fixer still choose their implementation files. Keep JSON compact; helpers derive lifecycle paths/state, and authority-required bookkeeping remains worker-discovered. Add `write_paths` only when authority already confines the task to specific files/directories; presence makes that boundary mechanically hard, and an explicit empty list means no project writes.
 
 Acceptance/proof text guides capable workers and reviewers; Python does not parse it to judge engineering success. `AC-*` labels are optional readability aids and are assigned automatically when absent.
 
@@ -51,7 +51,7 @@ protocol/roles/dsd-<role>/SKILL.md     # specialist doctrine
 protocol/PROOF-PATTERNS.md              # optional recipe library
 ```
 
-`WORKER_RULES.md` must not duplicate Common/role doctrine or changing task content.
+`WORKER_RULES.md` must not duplicate/contradict Common or role doctrine, reintroduce report parser grammar, or carry changing task content. A run-specific lesson repeated across several contracts belongs in the next rules revision; universal lessons belong in the skill.
 
 ## Tiny launch handoff
 
@@ -68,6 +68,8 @@ Read and obey:
 Prior evidence: <exact immutable paths/hashes, only when needed>
 Report: <attempt>/report.md
 ```
+
+Every attempt, including trusted same-session continuation, has a fresh report path. The worker should make **this attempt's report self-contained**, start it early, and keep it current; never tell a resumed worker merely to append to a prior attempt's report.
 
 Do not inline manuals, prior reports, or project history. Role selection is explicit; native skill discovery is not production authority. A role change gets a fresh session.
 
